@@ -1,0 +1,1522 @@
+// Member1 Firstname Lastname   6XXXXXX1
+// Member2 Firstname Lastname   6XXXXXX2
+// Member3 Firstname Lastname   6XXXXXX3
+// Member4 Firstname Lastname   6XXXXXX4
+// Member5 Firstname Lastname   6XXXXXX5
+package Project3_XXX;
+
+import java.awt.Color;
+import java.awt.Graphics2D;
+import java.awt.Point;
+import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Random;
+
+/**
+ * The arena: a tile map 56 x 36 tiles (32 px each) with a pre-rendered ground picture, props
+ * (cars, tents, lockers ...) that block movement with their lower part, a wall/fence border,
+ * the central camp where the player starts, monster spawn points near the edges, and a
+ * "flow field" that tells monsters which way to walk around obstacles towards the player.
+ *
+ * Every layout is built by hand-written rules (roads, rows of tents, rooms, fenced compounds),
+ * with a seeded Random only for small variations, so a map always looks the same.
+ */
+public final class GameMap {
+
+    public static final int COLS = 56, ROWS = 36;
+    private static final int T = GameData.TILE;
+
+    // ------------------------------------------------------------------ drawing order
+    /** Anything drawn in the world layer that must be sorted by its feet line (props and entities). */
+    public interface Drawable {
+        double getSortY();
+
+        void draw(Graphics2D g2);
+    }
+
+    /** Sorts drawables so things lower on the screen are drawn later (in front). */
+    public static final Comparator<Drawable> DEPTH_ORDER = Comparator.comparingDouble(Drawable::getSortY);
+
+    // ------------------------------------------------------------------ props
+    /** A placed object of the map. solid is the blocking footprint (its lower part) or null. */
+    public static final class Prop implements Drawable {
+        private final String name;
+        private final BufferedImage[] frames;
+        private final int ticksPerFrame;
+        private final int drawX, drawY;
+        private final Rectangle solid;
+        private final double sortY;
+        private int animTick;
+
+        Prop(String name, BufferedImage[] frames, int ticksPerFrame, int drawX, int drawY, Rectangle solid, double sortY) {
+            this.name = name;
+            this.frames = frames;
+            this.ticksPerFrame = ticksPerFrame;
+            this.drawX = drawX;
+            this.drawY = drawY;
+            this.solid = solid;
+            this.sortY = sortY;
+        }
+
+        public String getName() {
+            return name;
+        }
+
+        public BufferedImage getImage() {
+            return frames[(animTick / Math.max(1, ticksPerFrame)) % frames.length];
+        }
+
+        public BufferedImage[] getFrames() {
+            return frames.clone();
+        }
+
+        public int getDrawX() {
+            return drawX;
+        }
+
+        public int getDrawY() {
+            return drawY;
+        }
+
+        /** Blocking footprint in world pixels (a copy), or null if you can walk through it. */
+        public Rectangle getSolid() {
+            return solid == null ? null : new Rectangle(solid);
+        }
+
+        /** The whole picture's rectangle in world pixels (for culling). */
+        public Rectangle getDrawBounds() {
+            return new Rectangle(drawX, drawY, frames[0].getWidth(), frames[0].getHeight());
+        }
+
+        public boolean isAnimated() {
+            return frames.length > 1;
+        }
+
+        @Override
+        public double getSortY() {
+            return sortY;
+        }
+
+        /** Advances the animation by one tick (only animated props need this). */
+        public void update() {
+            animTick++;
+        }
+
+        @Override
+        public void draw(Graphics2D g2) {
+            g2.drawImage(getImage(), drawX, drawY, null);
+        }
+    }
+
+    /** A catalog entry: where the art is on its sheet and how big its blocking footprint is. */
+    private static final class PropDef {
+        final String name;
+        final String sheet;
+        final int sx, sy, w, h;
+        final int footH;       // height of the solid footprint measured from the art's bottom (0 = walk-through)
+        final int inset;       // footprint is this much narrower on each side than the art
+        final int frames;      // > 1 = horizontal animation strip starting at (sx, sy)
+        final int padBottom;   // empty rows under the art inside each frame
+        final int ticksPerFrame;
+
+        PropDef(String name, String sheet, int sx, int sy, int w, int h, int footH, int inset) {
+            this(name, sheet, sx, sy, w, h, footH, inset, 1, 0, 1);
+        }
+
+        PropDef(String name, String sheet, int sx, int sy, int w, int h, int footH, int inset,
+                int frames, int padBottom, int ticksPerFrame) {
+            this.name = name;
+            this.sheet = sheet;
+            this.sx = sx;
+            this.sy = sy;
+            this.w = w;
+            this.h = h;
+            this.footH = footH;
+            this.inset = inset;
+            this.frames = frames;
+            this.padBottom = padBottom;
+            this.ticksPerFrame = ticksPerFrame;
+        }
+
+        BufferedImage[] images() {
+            if (frames > 1) {
+                return AssetLoader.loadStrip(sheet, frames);
+            }
+            return new BufferedImage[]{AssetLoader.subImage(sheet, sx, sy, w, h)};
+        }
+    }
+
+    private static final String WASTE = "tiles/wasteland.png";
+    private static final String CAMP = "tiles/camp.png";
+    private static final String INTER = "tiles/interior.png";
+
+    // Wasteland sheet: vehicles, crates, barrels, tyres, pumps, signs
+    private static final PropDef CAR_RED_V = new PropDef("red car", WASTE, 0, 164, 32, 59, 46, 2);
+    private static final PropDef CAR_RED_H = new PropDef("red car", WASTE, 32, 185, 64, 38, 24, 2);
+    private static final PropDef CAR_BLUE_V = new PropDef("blue car", WASTE, 0, 224, 32, 64, 50, 2);
+    private static final PropDef VAN_BLUE_H = new PropDef("blue van", WASTE, 32, 248, 77, 40, 26, 2);
+    private static final PropDef CAR_BURNT_V = new PropDef("burnt car", WASTE, 0, 292, 32, 59, 46, 2);
+    private static final PropDef CAR_BURNT_H = new PropDef("burnt car", WASTE, 32, 313, 63, 37, 24, 2);
+    private static final PropDef VAN_BURNT_V = new PropDef("burnt van", WASTE, 1, 354, 30, 62, 48, 2);
+    private static final PropDef VAN_BURNT_H = new PropDef("burnt van", WASTE, 32, 376, 76, 39, 26, 2);
+    private static final PropDef CRATE_METAL = new PropDef("metal crate", WASTE, 131, 162, 26, 27, 16, 1);
+    private static final PropDef CRATE_METAL_G = new PropDef("metal crate", WASTE, 160, 162, 32, 31, 16, 4);
+    private static final PropDef CRATE_WOOD = new PropDef("wood crate", WASTE, 131, 194, 26, 27, 16, 1);
+    private static final PropDef CRATE_WOOD_G = new PropDef("wood crate", WASTE, 160, 194, 32, 31, 16, 4);
+    private static final PropDef BARREL_RED = new PropDef("red barrel", WASTE, 132, 225, 24, 29, 12, 2);
+    private static final PropDef BARREL_RED_G = new PropDef("red barrel", WASTE, 162, 225, 27, 32, 12, 4);
+    private static final PropDef BARREL_ORANGE = new PropDef("orange barrel", WASTE, 132, 257, 24, 29, 12, 2);
+    private static final PropDef BARREL_ORANGE_G = new PropDef("orange barrel", WASTE, 162, 257, 27, 32, 12, 4);
+    private static final PropDef GARAGE_GATE = new PropDef("garage gate", WASTE, 201, 178, 46, 78, 22, 0);
+    private static final PropDef PLANKS = new PropDef("planks", WASTE, 196, 265, 24, 18, 0, 0);
+    private static final PropDef STOP_SIGN = new PropDef("stop sign", WASTE, 229, 260, 22, 26, 5, 7);
+    private static final PropDef TIRES = new PropDef("tyres", WASTE, 130, 289, 28, 30, 14, 1);
+    private static final PropDef TIRES_LOW = new PropDef("tyres", WASTE, 162, 293, 28, 24, 12, 1);
+    private static final PropDef TIRES_G = new PropDef("tyres", WASTE, 192, 289, 32, 31, 14, 3);
+    private static final PropDef TIRES_LOW_G = new PropDef("tyres", WASTE, 225, 293, 31, 27, 12, 3);
+    private static final PropDef FENCE_BROKEN_A = new PropDef("broken fence", WASTE, 128, 324, 63, 28, 8, 2);
+    private static final PropDef FENCE_BROKEN_B = new PropDef("broken fence", WASTE, 198, 324, 53, 29, 8, 2);
+    private static final PropDef PUMP = new PropDef("fuel pump", WASTE, 141, 369, 35, 46, 16, 3);
+    private static final PropDef PUMP_G = new PropDef("fuel pump", WASTE, 205, 369, 38, 47, 16, 5);
+    private static final PropDef PUMP_ROW = new PropDef("pump island", WASTE, 0, 426, 128, 54, 20, 2);
+    private static final PropDef PUMP_ROW_BURNT = new PropDef("burnt pump island", WASTE, 0, 490, 128, 54, 20, 2);
+    private static final PropDef PUMP_BURNT = new PropDef("burnt pump", WASTE, 13, 561, 38, 47, 16, 4);
+    private static final PropDef CRATE_STACK = new PropDef("crate stack", WASTE, 134, 437, 51, 40, 22, 1);
+    private static final PropDef CRATE_STACK_G = new PropDef("crate stack", WASTE, 195, 437, 57, 44, 22, 4);
+    private static final PropDef METAL_STACK = new PropDef("metal crates", WASTE, 134, 499, 51, 41, 22, 1);
+    private static final PropDef METAL_STACK_G = new PropDef("metal crates", WASTE, 196, 499, 55, 43, 22, 4);
+    private static final PropDef METAL_STACK_OPEN = new PropDef("open crates", WASTE, 134, 564, 51, 41, 22, 1);
+    private static final PropDef SIGN_EXIT = new PropDef("exit sign", WASTE, 69, 546, 54, 30, 5, 6);
+    private static final PropDef SIGN_DANGER = new PropDef("danger sign", WASTE, 69, 578, 54, 30, 5, 6);
+    private static final PropDef TABLE_WORK = new PropDef("workbench", WASTE, 257, 64, 31, 32, 14, 0);
+    private static final PropDef TABLE_MED = new PropDef("medical table", WASTE, 257, 32, 31, 32, 14, 0);
+    private static final PropDef DESK_RADIO = new PropDef("radio desk", WASTE, 257, 96, 31, 32, 14, 0);
+
+    // Camp sheet: tents, stalls, fences, boxes, barrels, signs, farm plots, logs
+    private static final PropDef TENT_A = new PropDef("tent", CAMP, 28, 229, 68, 75, 44, 6);
+    private static final PropDef TENT_FLAT = new PropDef("tent", CAMP, 112, 250, 64, 54, 36, 2);
+    private static final PropDef TENT_GREEN = new PropDef("army tent", CAMP, 30, 336, 36, 64, 34, 2);
+    private static final PropDef TENT_GREEN_FLAT = new PropDef("army tent", CAMP, 80, 357, 63, 40, 28, 2);
+    private static final PropDef STALL_A = new PropDef("market stall", CAMP, 144, 325, 57, 75, 16, 6);
+    private static final PropDef STALL_B = new PropDef("market stall", CAMP, 209, 325, 57, 75, 16, 6);
+    private static final PropDef SHED = new PropDef("shed", CAMP, 276, 322, 50, 78, 16, 4);
+    private static final PropDef BOX = new PropDef("box", CAMP, 22, 438, 20, 26, 10, 1);
+    private static final PropDef PALLET = new PropDef("pallet", CAMP, 49, 432, 30, 31, 12, 1);
+    private static final PropDef BUCKET_TOOLS = new PropDef("tool bucket", CAMP, 81, 426, 29, 38, 10, 5);
+    private static final PropDef BUCKET_PIPES = new PropDef("pipe bucket", CAMP, 113, 424, 29, 40, 10, 5);
+    private static final PropDef BUCKET_WOOD = new PropDef("wood bucket", CAMP, 149, 426, 22, 38, 10, 3);
+    private static final PropDef SIGN_ELECTRIC = new PropDef("warning sign", CAMP, 213, 434, 24, 30, 4, 9);
+    private static final PropDef SIGN_SHELTER = new PropDef("shelter sign", CAMP, 243, 432, 27, 32, 4, 10);
+    private static final PropDef SIGN_KEEP_OUT = new PropDef("keep out sign", CAMP, 287, 433, 72, 31, 5, 8);
+    private static final PropDef SIGN_WARNING = new PropDef("warning sign", CAMP, 213, 466, 24, 30, 4, 9);
+    private static final PropDef SIGN_TOXIC = new PropDef("toxic sign", CAMP, 245, 466, 24, 30, 4, 9);
+    private static final PropDef SIGN_QUARANTINE = new PropDef("quarantine sign", CAMP, 287, 466, 72, 30, 5, 8);
+    private static final PropDef BOX_OPEN = new PropDef("open box", CAMP, 18, 470, 28, 26, 12, 2);
+    private static final PropDef BOX_PILE = new PropDef("box pile", CAMP, 55, 480, 37, 36, 16, 1);
+    private static final PropDef BOX_SUPPLY = new PropDef("supply boxes", CAMP, 99, 482, 38, 35, 14, 2);
+    private static final PropDef WATER_TANK_H = new PropDef("water tank", CAMP, 144, 474, 32, 21, 12, 1);
+    private static final PropDef WATER_TANK_V = new PropDef("water tank", CAMP, 181, 464, 22, 32, 16, 1);
+    private static final PropDef BOX_WATER = new PropDef("water box", CAMP, 18, 502, 28, 26, 12, 2);
+    private static final PropDef COT_V = new PropDef("cot", CAMP, 151, 496, 18, 32, 0, 0);
+    private static final PropDef COT_H = new PropDef("cot", CAMP, 176, 509, 32, 18, 0, 0);
+    private static final PropDef TOOLBOXES = new PropDef("toolboxes", CAMP, 240, 496, 46, 32, 12, 2);
+    private static final PropDef BOX_TOOLS = new PropDef("tool box", CAMP, 18, 536, 29, 24, 12, 2);
+    private static final PropDef BOX_EXTINGUISHER = new PropDef("box", CAMP, 49, 531, 30, 29, 12, 2);
+    private static final PropDef BOX_AMMO = new PropDef("ammo box", CAMP, 83, 529, 28, 31, 12, 2);
+    private static final PropDef BOX_MEDS = new PropDef("med box", CAMP, 114, 534, 29, 26, 12, 2);
+    private static final PropDef GAS_TANK = new PropDef("gas tank", CAMP, 21, 578, 23, 34, 14, 1);
+    private static final PropDef CRATE_CLUSTER = new PropDef("crates", CAMP, 48, 574, 63, 45, 22, 2);
+    private static final PropDef AMMO_CRATE_V = new PropDef("ammo crate", CAMP, 112, 583, 13, 38, 14, 0);
+    private static final PropDef AMMO_CRATE_H = new PropDef("ammo crate", CAMP, 145, 603, 30, 18, 12, 0);
+    private static final PropDef BARREL_STACK = new PropDef("barrels", CAMP, 190, 580, 37, 40, 18, 2);
+    private static final PropDef SIDE_TABLE = new PropDef("table", CAMP, 21, 628, 23, 28, 10, 1);
+    private static final PropDef CRATE_EMPTY = new PropDef("crate", CAMP, 52, 625, 24, 30, 14, 1);
+    private static final PropDef CRATE_CLOSED = new PropDef("crate", CAMP, 84, 625, 24, 30, 14, 1);
+    private static final PropDef BARREL_WOOD = new PropDef("barrel", CAMP, 117, 626, 22, 29, 12, 2);
+    private static final PropDef BARREL_GREY = new PropDef("barrel", CAMP, 149, 626, 22, 29, 12, 2);
+    private static final PropDef BARREL_BLUE = new PropDef("barrel", CAMP, 180, 624, 22, 31, 12, 2);
+    private static final PropDef BARREL_OIL = new PropDef("oil barrel", CAMP, 212, 624, 22, 31, 12, 2);
+    private static final PropDef STALL_FOOD = new PropDef("food stall", CAMP, 18, 669, 60, 40, 14, 2);
+    private static final PropDef STALL_TRADE = new PropDef("trade stall", CAMP, 80, 667, 64, 42, 14, 2);
+    private static final PropDef TABLE_FOOD = new PropDef("food table", CAMP, 146, 677, 60, 32, 14, 2);
+    private static final PropDef TABLE_TRADE = new PropDef("trade table", CAMP, 208, 677, 64, 32, 14, 2);
+    private static final PropDef PIPE_STACK = new PropDef("pipes", CAMP, 278, 666, 21, 54, 10, 2);
+    private static final PropDef WATER_TOWER = new PropDef("water tower", CAMP, 18, 722, 28, 62, 14, 1);
+    private static final PropDef PLANTER = new PropDef("planter", CAMP, 84, 726, 24, 26, 12, 1);
+    private static final PropDef PLANTER_LONG = new PropDef("planter", CAMP, 48, 760, 64, 24, 12, 1);
+    private static final PropDef PLANTER_TALL = new PropDef("planter", CAMP, 116, 720, 24, 64, 50, 1);
+    private static final PropDef CROP_BEET = new PropDef("crop", CAMP, 148, 725, 24, 27, 12, 1);
+    private static final PropDef CROP_ONION = new PropDef("crop", CAMP, 180, 723, 24, 29, 12, 1);
+    private static final PropDef CROP_WHEAT = new PropDef("crop", CAMP, 148, 756, 24, 28, 12, 1);
+    private static final PropDef CROP_CORN = new PropDef("crop", CAMP, 180, 756, 24, 28, 12, 1);
+    private static final PropDef LOGS_PAIR = new PropDef("logs", CAMP, 278, 721, 21, 63, 14, 1);
+    private static final PropDef LOGS_TIED = new PropDef("logs", CAMP, 304, 721, 32, 63, 14, 1);
+    private static final PropDef LOG_SINGLE = new PropDef("log", CAMP, 347, 726, 11, 58, 12, 0);
+    private static final PropDef TRASH_A = new PropDef("trash", CAMP, 244, 552, 25, 39, 0, 0);
+    private static final PropDef TRASH_B = new PropDef("trash", CAMP, 272, 556, 34, 35, 0, 0);
+    private static final PropDef TRASH_C = new PropDef("trash", CAMP, 317, 552, 38, 39, 0, 0);
+    private static final PropDef PAPERS = new PropDef("papers", CAMP, 289, 497, 15, 15, 0, 0);
+    private static final PropDef PAPERS_B = new PropDef("papers", CAMP, 306, 497, 12, 15, 0, 0);
+    private static final PropDef SACK = new PropDef("sack", CAMP, 304, 513, 16, 15, 0, 0);
+
+    // Interior sheet: bunker furniture
+    private static final PropDef CABINET = new PropDef("cabinet", INTER, 0, 224, 32, 45, 18, 0);
+    private static final PropDef LOCKER_PAIR = new PropDef("lockers", INTER, 47, 224, 34, 52, 18, 0);
+    private static final PropDef CUPBOARD = new PropDef("cupboard", INTER, 111, 224, 34, 45, 18, 0);
+    private static final PropDef LOCKER_TALL = new PropDef("tall lockers", INTER, 175, 224, 34, 59, 18, 0);
+    private static final PropDef SHELF_EMPTY = new PropDef("shelf", INTER, 227, 229, 26, 49, 14, 0);
+    private static final PropDef SHELF_WIDE = new PropDef("shelf", INTER, 268, 228, 40, 49, 14, 0);
+    private static final PropDef LOCKER = new PropDef("locker", INTER, 8, 288, 17, 45, 14, 0);
+    private static final PropDef LOCKER_BROKEN = new PropDef("broken locker", INTER, 40, 288, 22, 46, 14, 0);
+    private static final PropDef LOCKER_DOUBLE = new PropDef("lockers", INTER, 79, 288, 34, 45, 14, 0);
+    private static final PropDef FRIDGE = new PropDef("fridge", INTER, 130, 288, 28, 44, 16, 0);
+    private static final PropDef FRIDGE_OPEN = new PropDef("open fridge", INTER, 161, 288, 29, 45, 16, 0);
+    private static final PropDef FRIDGE_DOUBLE = new PropDef("fridges", INTER, 207, 288, 34, 48, 16, 0);
+    private static final PropDef SHELF_STOCKED = new PropDef("shelf", INTER, 268, 295, 40, 49, 14, 0);
+    private static final PropDef DESK_V = new PropDef("desk", INTER, 0, 353, 26, 48, 30, 0);
+    private static final PropDef DESK_V2 = new PropDef("desk", INTER, 38, 353, 26, 48, 30, 0);
+    private static final PropDef DESK_H = new PropDef("desk", INTER, 71, 354, 50, 30, 16, 0);
+    private static final PropDef VENDING_RED = new PropDef("vending machine", INTER, 128, 352, 32, 42, 16, 0);
+    private static final PropDef VENDING_BLACK = new PropDef("vending machine", INTER, 160, 352, 32, 42, 16, 0);
+    private static final PropDef VENDING_COFFEE = new PropDef("coffee machine", INTER, 193, 352, 30, 45, 16, 0);
+    private static final PropDef RACK = new PropDef("rack", INTER, 225, 364, 30, 32, 12, 0);
+    private static final PropDef RACK_STOCKED = new PropDef("rack", INTER, 257, 364, 30, 32, 12, 0);
+    private static final PropDef DESK_PC_V = new PropDef("computer desk", INTER, 0, 417, 26, 50, 30, 0);
+    private static final PropDef DESK_LAB_V = new PropDef("lab desk", INTER, 38, 416, 26, 51, 30, 0);
+    private static final PropDef DESK_PC_H = new PropDef("computer desk", INTER, 71, 416, 50, 32, 16, 0);
+    private static final PropDef DRAWERS = new PropDef("drawers", INTER, 132, 438, 23, 22, 12, 0);
+    private static final PropDef DRAWERS_B = new PropDef("drawers", INTER, 165, 438, 23, 22, 12, 0);
+    private static final PropDef GURNEY_CURTAIN = new PropDef("ward bed", INTER, 192, 432, 45, 46, 18, 0);
+    private static final PropDef WATER_COOLER = new PropDef("water cooler", INTER, 264, 425, 16, 30, 10, 0);
+    private static final PropDef BED_V = new PropDef("bed", INTER, 4, 480, 24, 39, 34, 0);
+    private static final PropDef BED_H = new PropDef("bed", INTER, 57, 483, 39, 29, 20, 0);
+    private static final PropDef BED_FRAME_V = new PropDef("bed frame", INTER, 100, 480, 24, 39, 34, 0);
+    private static final PropDef BED_FRAME_H = new PropDef("bed frame", INTER, 153, 483, 39, 29, 20, 0);
+    private static final PropDef OP_TABLE = new PropDef("operating table", INTER, 217, 480, 39, 27, 18, 0);
+    private static final PropDef OP_TABLE_B = new PropDef("operating table", INTER, 192, 496, 39, 43, 18, 0);
+    private static final PropDef BED_H2 = new PropDef("bed", INTER, 32, 515, 39, 29, 20, 0);
+    private static final PropDef BED_FRAME_H2 = new PropDef("bed frame", INTER, 128, 515, 39, 29, 20, 0);
+
+    // Animated camp props (strips)
+    private static final PropDef FLAME_BARREL = new PropDef("flame barrel", "tiles/flame_barrel.png", 0, 0, 64, 64, 12, 22, 7, 5, 6);
+    private static final PropDef FLAG = new PropDef("camp flag", "tiles/flag.png", 0, 0, 64, 64, 10, 21, 7, 5, 7);
+    private static final PropDef NPC_TRADER = new PropDef("trader", "characters/npc_idle.png", 0, 0, 32, 32, 6, 9, 6, 0, 9);
+    private static final PropDef NPC_GUARD = new PropDef("guard", "characters/npc2_idle.png", 0, 0, 32, 32, 6, 9, 6, 0, 10);
+
+    // ------------------------------------------------------------------ ground tiles
+    private static final int SAND = 0, DIRT = 1, FLOOR = 2;
+    private static final int DIRT_RGB = 0xAD7757;
+
+    private final GameData.MapType type;
+    private final Random rng;
+    private final int[][] terrain = new int[ROWS][COLS];
+    private final boolean[][] wall = new boolean[ROWS][COLS];   // bunker walls (solid, drawn into the ground)
+    private BufferedImage ground;
+    private BufferedImage minimap;
+    private final List<Prop> props = new ArrayList<>();
+    private final List<Prop> animatedProps = new ArrayList<>();
+    private final List<Rectangle> solids = new ArrayList<>();
+    private final List<List<Rectangle>> solidsByCell = new ArrayList<>();
+    private final List<Rectangle> keepClear = new ArrayList<>();
+    private final List<int[]> decals = new ArrayList<>();          // {defIndex, x, y}
+    private final List<PropDef> decalDefs = new ArrayList<>();
+    private final Rectangle playArea = new Rectangle(T, T, (COLS - 2) * T, (ROWS - 2) * T);
+    private Rectangle campArea;          // world pixels
+    private Point playerSpawn;
+    private final List<Point> spawnPoints = new ArrayList<>();
+    private boolean[][] walkable;
+
+    // flow field towards the player
+    private final int[][] flow = new int[ROWS][COLS];
+    private int flowCol = -1, flowRow = -1;
+    private static final int FAR = Integer.MAX_VALUE;
+
+    // ------------------------------------------------------------------ construction
+    public GameMap(GameData.MapType type, long seed) {
+        this.type = type;
+        this.rng = new Random(seed);
+        for (int i = 0; i < ROWS * COLS; i++) {
+            solidsByCell.add(new ArrayList<>());
+        }
+        int campCol = COLS / 2 - 6, campRow = ROWS / 2 - 5;
+        campArea = new Rectangle(campCol * T, campRow * T, 12 * T, 10 * T);
+        playerSpawn = new Point(campArea.x + campArea.width / 2, campArea.y + campArea.height / 2 + T);
+        buildCamp();
+        // the camp's open middle must stay free of anything the map adds later
+        keepClear.add(new Rectangle(campArea.x + T, campArea.y + 3 * T, campArea.width - 2 * T, campArea.height - 3 * T));
+
+        switch (type) {
+            case WASTELAND_HIGHWAY: buildHighway(); break;
+            case SURVIVOR_CAMP: buildSurvivorCamp(); break;
+            case ABANDONED_BUNKER: buildBunker(); break;
+            case GAS_STATION: buildGasStation(); break;
+            default: buildQuarantine(); break;
+        }
+        renderGround();
+        computeWalkable();
+        findSpawnPoints();
+        renderMinimap();
+    }
+
+    // ------------------------------------------------------------------ public API
+    public GameData.MapType getType() {
+        return type;
+    }
+
+    public int getWidthPx() {
+        return COLS * T;
+    }
+
+    public int getHeightPx() {
+        return ROWS * T;
+    }
+
+    /** True if the rectangle leaves the walkable area or touches a solid footprint / wall. */
+    public boolean isBlocked(Rectangle r) {
+        if (!playArea.contains(r)) {
+            return true;
+        }
+        int c0 = r.x / T, c1 = (r.x + r.width - 1) / T;
+        int r0 = r.y / T, r1 = (r.y + r.height - 1) / T;
+        for (int row = r0; row <= r1; row++) {
+            for (int col = c0; col <= c1; col++) {
+                if (wall[row][col]) {
+                    return true;
+                }
+                for (Rectangle s : solidsByCell.get(row * COLS + col)) {
+                    if (s.intersects(r)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /** Where the player starts: the middle of the camp clearing. */
+    public Point getPlayerSpawn() {
+        return new Point(playerSpawn);
+    }
+
+    /** The camp clearing in world pixels. */
+    public Rectangle getCampArea() {
+        return new Rectangle(campArea);
+    }
+
+    /**
+     * A free spot near the map edge that is not visible in cameraView (world pixels), for spawning
+     * a monster. Falls back to the spawn point farthest from the view if every point is visible.
+     */
+    public Point randomSpawnPoint(Random random, Rectangle cameraView) {
+        Rectangle hidden = new Rectangle(cameraView);
+        hidden.grow(48, 48);
+        List<Point> choices = new ArrayList<>();
+        for (Point p : spawnPoints) {
+            if (!hidden.contains(p)) {
+                choices.add(p);
+            }
+        }
+        if (!choices.isEmpty()) {
+            return new Point(choices.get(random.nextInt(choices.size())));
+        }
+        Point best = spawnPoints.get(0);
+        double bestDist = -1;
+        double cx = cameraView.getCenterX(), cy = cameraView.getCenterY();
+        for (Point p : spawnPoints) {
+            double d = Math.hypot(p.x - cx, p.y - cy);
+            if (d > bestDist) {
+                bestDist = d;
+                best = p;
+            }
+        }
+        return new Point(best);
+    }
+
+    /** All spawn points (tile centres near the edges, reachable from the camp). */
+    public List<Point> getSpawnPoints() {
+        List<Point> copy = new ArrayList<>();
+        for (Point p : spawnPoints) {
+            copy.add(new Point(p));
+        }
+        return copy;
+    }
+
+    /** Draws only the visible part of the pre-rendered ground (world coordinates). */
+    public void drawGround(Graphics2D g2, Rectangle cameraView) {
+        Rectangle v = cameraView.intersection(new Rectangle(0, 0, getWidthPx(), getHeightPx()));
+        if (v.isEmpty()) {
+            return;
+        }
+        g2.drawImage(ground, v.x, v.y, v.x + v.width, v.y + v.height, v.x, v.y, v.x + v.width, v.y + v.height, null);
+    }
+
+    /** All props (read-only list). */
+    public List<Prop> getProps() {
+        return Collections.unmodifiableList(props);
+    }
+
+    /** Props whose picture overlaps the view (so the panel does not sort hundreds of off-screen props). */
+    public List<Prop> getPropsInView(Rectangle cameraView) {
+        List<Prop> list = new ArrayList<>();
+        for (Prop p : props) {
+            if (p.getDrawBounds().intersects(cameraView)) {
+                list.add(p);
+            }
+        }
+        return list;
+    }
+
+    /** Advances animated props (flame barrel, flag, NPCs). Call once per tick. */
+    public void update() {
+        for (Prop p : animatedProps) {
+            p.update();
+        }
+    }
+
+    /** One pixel per tile overview (ground colour, solid = dark) for the HUD mini-map. */
+    public BufferedImage getMinimap() {
+        return minimap;
+    }
+
+    /** The whole pre-rendered ground picture (used by tools and tests). */
+    public BufferedImage getGroundImage() {
+        return ground;
+    }
+
+    /** Every blocking rectangle (prop footprints) plus wall cells, in world pixels. */
+    public List<Rectangle> getSolidRects() {
+        List<Rectangle> list = new ArrayList<>();
+        for (Rectangle s : solids) {
+            list.add(new Rectangle(s));
+        }
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                if (wall[r][c]) {
+                    list.add(new Rectangle(c * T, r * T, T, T));
+                }
+            }
+        }
+        return list;
+    }
+
+    /** True if a walker can stand in the middle of this tile. */
+    public boolean isWalkableTile(int col, int row) {
+        return col >= 0 && row >= 0 && col < COLS && row < ROWS && walkable[row][col];
+    }
+
+    // ------------------------------------------------------------------ path finding for monsters
+    /**
+     * Direction (radians) a monster at (fromX, fromY) should walk to reach (toX, toY): straight at
+     * the target when nothing is in the way, otherwise downhill on a breadth-first "distance to the
+     * player" grid, which leads around props and walls.
+     */
+    public double getChaseAngle(double fromX, double fromY, double toX, double toY) {
+        double direct = Math.atan2(toY - fromY, toX - fromX);
+        if (hasClearPath(fromX, fromY, toX, toY)) {
+            return direct;
+        }
+        refreshFlow((int) (toX / T), (int) (toY / T));
+        int col = (int) (fromX / T), row = (int) (fromY / T);
+        if (col < 0 || row < 0 || col >= COLS || row >= ROWS) {
+            return direct;
+        }
+        int bestCol = -1, bestRow = -1;
+        int best = flow[row][col];
+        for (int dr = -1; dr <= 1; dr++) {
+            for (int dc = -1; dc <= 1; dc++) {
+                int nc = col + dc, nr = row + dr;
+                if ((dc == 0 && dr == 0) || !isWalkableTile(nc, nr)) {
+                    continue;
+                }
+                // a diagonal step is only allowed if both side tiles are open (no corner cutting)
+                if (dc != 0 && dr != 0 && (!isWalkableTile(col + dc, row) || !isWalkableTile(col, row + dr))) {
+                    continue;
+                }
+                if (flow[nr][nc] < best) {
+                    best = flow[nr][nc];
+                    bestCol = nc;
+                    bestRow = nr;
+                }
+            }
+        }
+        if (bestCol < 0) {
+            return direct;
+        }
+        double tx = bestCol * T + T / 2.0, ty = bestRow * T + T / 2.0;
+        return Math.atan2(ty - fromY, tx - fromX);
+    }
+
+    /** Samples the straight line every 8 px with a small feet-sized box. */
+    public boolean hasClearPath(double x0, double y0, double x1, double y1) {
+        double dist = Math.hypot(x1 - x0, y1 - y0);
+        int steps = (int) (dist / 8);
+        Rectangle probe = new Rectangle(0, 0, 12, 8);
+        for (int i = 1; i < steps; i++) {
+            double t = i / (double) steps;
+            probe.x = (int) (x0 + (x1 - x0) * t) - 6;
+            probe.y = (int) (y0 + (y1 - y0) * t) - 4;
+            if (isBlocked(probe)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** Rebuilds the distance grid when the target moved to another tile. */
+    private void refreshFlow(int targetCol, int targetRow) {
+        targetCol = Math.max(0, Math.min(COLS - 1, targetCol));
+        targetRow = Math.max(0, Math.min(ROWS - 1, targetRow));
+        if (targetCol == flowCol && targetRow == flowRow) {
+            return;
+        }
+        flowCol = targetCol;
+        flowRow = targetRow;
+        fillDistances(flow, targetCol, targetRow);
+    }
+
+    /** Breadth-first search: every reachable walkable tile gets its step count from the start tile. */
+    private void fillDistances(int[][] dist, int startCol, int startRow) {
+        for (int[] row : dist) {
+            Arrays.fill(row, FAR);
+        }
+        ArrayDeque<int[]> queue = new ArrayDeque<>();
+        dist[startRow][startCol] = 0;
+        queue.add(new int[]{startCol, startRow});
+        int[][] steps = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        while (!queue.isEmpty()) {
+            int[] cur = queue.poll();
+            for (int[] s : steps) {
+                int nc = cur[0] + s[0], nr = cur[1] + s[1];
+                if (isWalkableTile(nc, nr) && dist[nr][nc] == FAR) {
+                    dist[nr][nc] = dist[cur[1]][cur[0]] + 1;
+                    queue.add(new int[]{nc, nr});
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ building helpers
+    /** Marks a tile rectangle with a ground type. */
+    private void paint(int ground, int col, int row, int w, int h) {
+        for (int r = row; r < row + h; r++) {
+            for (int c = col; c < col + w; c++) {
+                if (r >= 0 && c >= 0 && r < ROWS && c < COLS) {
+                    terrain[r][c] = ground;
+                }
+            }
+        }
+    }
+
+    /** No solid prop may be placed here (lanes for the horde, the camp clearing). Tile units. */
+    private void reserve(int col, int row, int w, int h) {
+        keepClear.add(new Rectangle(col * T, row * T, w * T, h * T));
+    }
+
+    /**
+     * Places a prop whose art stands on the point (cx, bottom). Returns false (and places nothing)
+     * if its footprint would leave the play area, overlap another footprint or a reserved lane.
+     */
+    private boolean put(PropDef d, double cx, double bottom) {
+        int left = (int) Math.round(cx - d.w / 2.0);
+        int artBottom = (int) Math.round(bottom);
+        Rectangle solid = null;
+        if (d.footH > 0) {
+            solid = new Rectangle(left + d.inset, artBottom - d.footH, d.w - 2 * d.inset, d.footH);
+            if (!playArea.contains(solid)) {
+                return false;
+            }
+            for (Rectangle k : keepClear) {
+                if (k.intersects(solid)) {
+                    return false;
+                }
+            }
+            for (Rectangle s : solids) {
+                if (s.intersects(solid)) {
+                    return false;
+                }
+            }
+            if (overlapsWall(solid)) {
+                return false;
+            }
+        } else if (!playArea.contains(new Rectangle(left, artBottom - 1, d.w, 1))) {
+            return false;
+        }
+        BufferedImage[] imgs = d.images();
+        int drawY = artBottom + d.padBottom - imgs[0].getHeight();
+        int drawX = (int) Math.round(cx - imgs[0].getWidth() / 2.0);
+        Prop p = new Prop(d.name, imgs, d.ticksPerFrame, drawX, drawY, solid, artBottom);
+        props.add(p);
+        if (p.isAnimated()) {
+            animatedProps.add(p);
+        }
+        if (solid != null) {
+            addSolid(solid);
+        }
+        return true;
+    }
+
+    /** Places a prop standing on the bottom of tile (col, row), centred on that tile. */
+    private boolean putTile(PropDef d, int col, int row) {
+        return put(d, col * T + T / 2.0, (row + 1) * T);
+    }
+
+    /** Places a prop whose art's left edge starts at tile col (for wide props that span several tiles). */
+    private boolean putLeft(PropDef d, int col, int row) {
+        return put(d, col * T + d.w / 2.0, (row + 1) * T);
+    }
+
+    /** Tries up to `tries` random spots inside a tile area and places `count` props from the list. */
+    private int scatter(PropDef[] options, int col, int row, int w, int h, int count, int tries) {
+        int placed = 0;
+        for (int i = 0; i < tries && placed < count; i++) {
+            PropDef d = options[rng.nextInt(options.length)];
+            double cx = (col + rng.nextDouble() * w) * T;
+            double bottom = (row + 1 + rng.nextDouble() * (h - 1)) * T;
+            Rectangle gap = new Rectangle((int) cx - d.w / 2 - 6, (int) bottom - d.footH - 6, d.w + 12, d.footH + 12);
+            if (touchesSolid(gap)) {
+                continue;  // keep a little space so clusters stay readable and walkable
+            }
+            if (put(d, cx, bottom)) {
+                placed++;
+            }
+        }
+        return placed;
+    }
+
+    private boolean touchesSolid(Rectangle r) {
+        for (Rectangle s : solids) {
+            if (s.intersects(r)) {
+                return true;
+            }
+        }
+        return overlapsWall(r);
+    }
+
+    /** A flat ground decoration painted into the ground picture (papers, planks ...). */
+    private void decal(PropDef d, int x, int y) {
+        decalDefs.add(d);
+        decals.add(new int[]{decalDefs.size() - 1, x, y});
+    }
+
+    private void addSolid(Rectangle s) {
+        solids.add(s);
+        int c0 = Math.max(0, s.x / T), c1 = Math.min(COLS - 1, (s.x + s.width - 1) / T);
+        int r0 = Math.max(0, s.y / T), r1 = Math.min(ROWS - 1, (s.y + s.height - 1) / T);
+        for (int r = r0; r <= r1; r++) {
+            for (int c = c0; c <= c1; c++) {
+                solidsByCell.get(r * COLS + c).add(s);
+            }
+        }
+    }
+
+    private boolean overlapsWall(Rectangle r) {
+        int c0 = Math.max(0, r.x / T), c1 = Math.min(COLS - 1, (r.x + r.width - 1) / T);
+        int r0 = Math.max(0, r.y / T), r1 = Math.min(ROWS - 1, (r.y + r.height - 1) / T);
+        for (int row = r0; row <= r1; row++) {
+            for (int col = c0; col <= c1; col++) {
+                if (wall[row][col]) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /** A straight wall of cells (bunker). */
+    private void wallRect(int col, int row, int w, int h) {
+        for (int r = row; r < row + h; r++) {
+            for (int c = col; c < col + w; c++) {
+                if (r >= 0 && c >= 0 && r < ROWS && c < COLS) {
+                    wall[r][c] = true;
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ the camp (same idea on every map)
+    /**
+     * The safe-looking camp in the middle: tents along the back, a workbench with the trader,
+     * a guard, the burning barrel and the flag. Its centre stays empty so the fight has room.
+     */
+    private void buildCamp() {
+        int c0 = campArea.x / T, r0 = campArea.y / T;
+        boolean indoor = type == GameData.MapType.ABANDONED_BUNKER;
+        if (!indoor) {
+            paint(DIRT, c0, r0, 12, 10);
+        }
+        // back row (north side): shelter + workbench + trader, crates
+        if (indoor) {
+            putLeft(BED_FRAME_H, c0 + 1, r0 + 1);
+            putLeft(LOCKER_DOUBLE, c0 + 3, r0 + 1);
+        } else {
+            putLeft(TENT_A, c0, r0 + 2);
+        }
+        putTile(TABLE_WORK, c0 + 4, r0 + 2);
+        putTile(TABLE_MED, c0 + 5, r0 + 2);
+        putTile(NPC_TRADER, c0 + 6, r0 + 2);
+        putTile(DESK_RADIO, c0 + 7, r0 + 2);
+        putLeft(indoor ? SHELF_STOCKED : TENT_GREEN, c0 + 8, r0 + 2);
+        putLeft(indoor ? RACK_STOCKED : BOX_SUPPLY, c0 + 10, r0 + 2);
+        // the fire and the flag are the camp's landmarks
+        put(FLAME_BARREL, playerSpawn.x - 2.5 * T, playerSpawn.y - 0.5 * T);
+        put(FLAG, playerSpawn.x + 3 * T, playerSpawn.y - 2.2 * T);
+        putTile(NPC_GUARD, c0 + 2, r0 + 5);
+        put(indoor ? WATER_COOLER : BOX_WATER, campArea.x + campArea.width - 1.2 * T, playerSpawn.y + 2.5 * T);
+    }
+
+    // ------------------------------------------------------------------ map 1: highway
+    private void buildHighway() {
+        // an east-west highway across the north, a side road running south through the camp
+        paint(DIRT, 1, 5, COLS - 2, 5);
+        paint(DIRT, 25, 10, 6, ROWS - 11);
+        reserve(1, 6, COLS - 2, 3);          // the middle lanes of the highway stay drivable
+        reserve(26, 10, 4, ROWS - 11);       // the side road is the main horde lane
+        reserve(1, 22, COLS - 2, 3);         // southern east-west lane
+
+        // wrecks on the highway: a pile-up in the west, a blockade in the east, single wrecks between
+        putLeft(CAR_RED_H, 4, 5);
+        putLeft(VAN_BURNT_H, 9, 5);
+        putLeft(CAR_BURNT_V, 14, 5);
+        put(CAR_BLUE_V, 16 * T, 10 * T);
+        putLeft(CAR_BURNT_H, 17, 9);
+        putLeft(TIRES_LOW, 20, 9);
+        putLeft(VAN_BLUE_H, 36, 5);
+        putLeft(CAR_RED_H, 41, 9);
+        putLeft(CAR_BURNT_H, 47, 5);
+        put(VAN_BURNT_V, 52 * T, 10 * T);
+        putLeft(BARREL_ORANGE, 45, 9);
+        putLeft(BARREL_RED, 46, 9);
+        decal(PLANKS, 30 * T, 7 * T + 10);
+        decal(PLANKS, 11 * T, 8 * T);
+
+        // roadside north of the highway
+        putLeft(SIGN_EXIT, 6, 3);
+        putLeft(TIRES_G, 12, 3);
+        putLeft(TIRES_LOW_G, 13, 3);
+        putLeft(FENCE_BROKEN_A, 20, 3);
+        putLeft(FENCE_BROKEN_B, 22, 3);
+        putLeft(SIGN_DANGER, 33, 3);
+        putLeft(CRATE_STACK_G, 42, 3);
+        putTile(BARREL_RED_G, 44, 3);
+        putLeft(STOP_SIGN, 24, 4);
+        putLeft(TIRES, 50, 3);
+
+        // south of the highway: roadside junk along the shoulder
+        putLeft(STOP_SIGN, 31, 11);
+        putLeft(SIGN_EXIT, 33, 12);
+        putTile(BARREL_ORANGE_G, 22, 12);
+        putTile(BARREL_RED, 23, 12);
+
+        // scrapyard in the south-west: stacked wrecks and tyre piles around a yard
+        putLeft(CAR_BURNT_V, 3, 15);
+        putLeft(CAR_RED_V, 4, 15);
+        putLeft(VAN_BURNT_H, 6, 13);
+        putLeft(TIRES, 9, 14);
+        putLeft(TIRES_LOW, 10, 14);
+        putLeft(METAL_STACK, 12, 14);
+        putLeft(CAR_BLUE_V, 3, 20);
+        putLeft(TIRES_G, 5, 19);
+        putLeft(CRATE_METAL, 12, 18);
+        putLeft(CRATE_METAL_G, 13, 18);
+        putLeft(FENCE_BROKEN_A, 7, 20);
+        putLeft(CAR_BURNT_H, 15, 20);
+        scatter(new PropDef[]{TIRES_LOW_G, BARREL_RED_G, CRATE_WOOD_G}, 3, 26, 18, 7, 7, 80);
+
+        // ranch in the south-east: a broken fence square with barrels and a water tank inside
+        putLeft(FENCE_BROKEN_A, 36, 13);
+        putLeft(FENCE_BROKEN_B, 39, 13);
+        putLeft(FENCE_BROKEN_A, 45, 13);
+        putLeft(FENCE_BROKEN_B, 48, 13);
+        putLeft(FENCE_BROKEN_A, 36, 20);
+        putLeft(FENCE_BROKEN_B, 45, 20);
+        putLeft(FENCE_BROKEN_A, 48, 20);
+        putLeft(WATER_TOWER, 41, 16);
+        putLeft(BARREL_ORANGE, 43, 16);
+        putLeft(BARREL_RED, 44, 16);
+        putLeft(CRATE_WOOD, 47, 17);
+        putLeft(PALLET, 38, 17);
+        scatter(new PropDef[]{CAR_BURNT_H, VAN_BURNT_H, CAR_RED_H}, 34, 26, 18, 7, 3, 60);
+        scatter(new PropDef[]{TIRES_G, BARREL_ORANGE_G, CRATE_METAL_G, TIRES_LOW_G}, 34, 26, 18, 7, 6, 80);
+        sandPatches(10);
+    }
+
+    // ------------------------------------------------------------------ map 2: survivor camp
+    private void buildSurvivorCamp() {
+        // a main street and three cross streets of trodden dirt
+        paint(DIRT, 1, 17, COLS - 2, 3);
+        paint(DIRT, 8, 2, 3, ROWS - 4);
+        paint(DIRT, 45, 2, 3, ROWS - 4);
+        paint(DIRT, 26, 2, 4, ROWS - 4);
+        reserve(1, 17, COLS - 2, 3);
+        reserve(8, 2, 3, ROWS - 4);
+        reserve(45, 2, 3, ROWS - 4);
+        reserve(26, 2, 4, ROWS - 4);
+
+        // tent rows facing the streets
+        int[] northRows = {5, 10, 15};
+        for (int r : northRows) {
+            putLeft(TENT_A, 1, r);
+            putLeft(TENT_FLAT, 12, r);
+            putLeft(TENT_A, 16, r);
+            putLeft(TENT_FLAT, 34, r);
+            putLeft(TENT_A, 38, r);
+            putLeft(TENT_GREEN, 49, r);
+            putLeft(TENT_GREEN_FLAT, 51, r);
+        }
+        // small things between the tents
+        putTile(BARREL_WOOD, 4, 5);
+        putTile(BOX, 5, 10);
+        putTile(BUCKET_WOOD, 6, 15);
+        putTile(BOX_OPEN, 21, 5);
+        putTile(BARREL_BLUE, 22, 10);
+        putTile(CRATE_CLOSED, 21, 15);
+        putTile(BUCKET_TOOLS, 42, 5);
+        putTile(BARREL_GREY, 43, 10);
+        putTile(BOX_WATER, 42, 15);
+
+        // south: market square west, farm plots east, stores near the palisade
+        putLeft(STALL_A, 12, 22);
+        putLeft(STALL_B, 15, 22);
+        putLeft(SHED, 18, 22);
+        putLeft(STALL_FOOD, 12, 26);
+        putLeft(STALL_TRADE, 15, 26);
+        putLeft(TABLE_FOOD, 19, 26);
+        putTile(BARREL_WOOD, 22, 26);
+        putLeft(TABLE_TRADE, 12, 30);
+        putLeft(BOX_PILE, 16, 30);
+        putLeft(PALLET, 19, 30);
+        putTile(BUCKET_PIPES, 21, 30);
+
+        for (int r = 22; r <= 30; r += 4) {
+            putLeft(PLANTER_LONG, 32, r);
+            putLeft(PLANTER_LONG, 36, r);
+            putTile(CROP_CORN, 40, r);
+            putTile(CROP_WHEAT, 41, r);
+            putTile(CROP_BEET, 42, r);
+        }
+        putLeft(WATER_TOWER, 43, 25);
+        putLeft(PLANTER_TALL, 39, 33);
+        putTile(PLANTER, 33, 33);
+        putTile(PLANTER, 35, 33);
+
+        putLeft(LOGS_TIED, 1, 23);
+        putLeft(LOGS_PAIR, 3, 23);
+        putLeft(PIPE_STACK, 5, 23);
+        putLeft(CRATE_CLUSTER, 1, 28);
+        putLeft(BARREL_STACK, 4, 28);
+        putLeft(WATER_TANK_V, 6, 32);
+        putLeft(WATER_TANK_H, 1, 33);
+        putLeft(STALL_A, 49, 23);
+        putLeft(BOX_SUPPLY, 52, 23);
+        putLeft(TOOLBOXES, 49, 28);
+        putLeft(CRATE_EMPTY, 52, 28);
+        putLeft(SIDE_TABLE, 53, 28);
+        putLeft(BARREL_STACK, 49, 32);
+        decal(PAPERS, 24 * T, 20 * T + 6);
+        decal(SACK, 31 * T, 21 * T);
+        decal(PAPERS_B, 13 * T, 20 * T + 12);
+    }
+
+    // ------------------------------------------------------------------ map 3: bunker
+    private void buildBunker() {
+        paint(FLOOR, 0, 0, COLS, ROWS);
+        // outer walls: thick north wall (shows its face), one-cell walls elsewhere
+        wallRect(0, 0, COLS, 2);
+        wallRect(0, 0, 1, ROWS);
+        wallRect(COLS - 1, 0, 1, ROWS);
+        wallRect(0, ROWS - 1, COLS, 1);
+
+        // inner walls with wide doorways: four rooms around a central hall
+        wallRect(1, 11, 7, 2);       // dorm south wall, door at cols 8-12
+        wallRect(13, 11, 6, 2);
+        wallRect(18, 2, 1, 9);       // dorm east wall
+        wallRect(37, 11, 6, 2);      // lab south wall, door at cols 43-47
+        wallRect(48, 11, 7, 2);
+        wallRect(37, 2, 1, 9);       // lab west wall
+        wallRect(1, 24, 7, 2);       // storage north wall
+        wallRect(13, 24, 6, 2);
+        wallRect(18, 26, 1, 9);      // storage east wall
+        wallRect(37, 24, 6, 2);      // canteen north wall
+        wallRect(48, 24, 7, 2);
+        wallRect(37, 26, 1, 9);      // canteen west wall
+        reserve(8, 9, 5, 6);
+        reserve(43, 9, 5, 6);
+        reserve(8, 22, 5, 6);
+        reserve(43, 22, 5, 6);
+        reserve(1, 15, COLS - 2, 6);         // the main corridor across the hall
+        reserve(19, 2, 4, ROWS - 3);         // corridors north-south next to the rooms
+        reserve(33, 2, 4, ROWS - 3);
+
+        // dorm (north-west): rows of beds
+        for (int c = 2; c <= 14; c += 3) {
+            putLeft(c % 2 == 0 ? BED_V : BED_FRAME_V, c, 4);
+            putLeft(c % 2 == 0 ? BED_FRAME_V : BED_V, c, 9);
+        }
+        putLeft(LOCKER_PAIR, 16, 3);
+        putLeft(DRAWERS, 15, 6);
+
+        // lab (north-east): ward beds, operating tables, desks
+        putLeft(GURNEY_CURTAIN, 39, 4);
+        putLeft(GURNEY_CURTAIN, 43, 4);
+        putLeft(GURNEY_CURTAIN, 47, 4);
+        putLeft(OP_TABLE, 40, 8);
+        putLeft(OP_TABLE_B, 45, 9);
+        putLeft(DESK_LAB_V, 52, 5);
+        putLeft(DESK_PC_V, 53, 9);
+        putLeft(WATER_COOLER, 50, 3);
+        putLeft(CABINET, 51, 3);
+
+        // storage (south-west): shelves and lockers in aisles
+        for (int c = 2; c <= 14; c += 4) {
+            putLeft(c % 8 == 2 ? SHELF_STOCKED : SHELF_WIDE, c, 29);
+            putLeft(c % 8 == 2 ? FRIDGE_DOUBLE : LOCKER_TALL, c + 1, 33);
+        }
+        putLeft(RACK_STOCKED, 15, 29);
+        putLeft(LOCKER_BROKEN, 16, 33);
+        putLeft(CUPBOARD, 2, 33);
+
+        // canteen (south-east): vending machines on the wall, tables in the room
+        putLeft(VENDING_RED, 39, 28);
+        putLeft(VENDING_BLACK, 40, 28);
+        putLeft(VENDING_COFFEE, 41, 28);
+        putLeft(FRIDGE, 43, 28);
+        putLeft(FRIDGE_OPEN, 44, 28);
+        putLeft(DESK_H, 40, 32);
+        putLeft(DESK_PC_H, 45, 32);
+        putLeft(DESK_H, 50, 32);
+        putLeft(DESK_H, 50, 28);
+        putLeft(LOCKER, 53, 28);
+
+        // the hall: office desks and lockers along the corridors, not in them
+        putLeft(DESK_V, 23, 4);
+        putLeft(DESK_PC_V, 25, 4);
+        putLeft(DESK_V2, 30, 4);
+        putLeft(DESK_PC_V, 32, 4);
+        putLeft(LOCKER_DOUBLE, 24, 9);
+        putLeft(CABINET, 30, 9);
+        putLeft(DRAWERS_B, 23, 29);
+        putLeft(RACK, 25, 32);
+        putLeft(LOCKER_TALL, 30, 30);
+        putLeft(SHELF_EMPTY, 32, 33);
+        putLeft(BED_H2, 23, 33);
+        putLeft(BED_FRAME_H2, 28, 27);
+    }
+
+    // ------------------------------------------------------------------ map 4: gas station
+    private void buildGasStation() {
+        paint(DIRT, 12, 2, 32, 10);          // the forecourt
+        paint(DIRT, 1, 27, COLS - 2, 5);     // the road along the south
+        paint(DIRT, 15, 12, 5, 15);          // two driveways from road to forecourt
+        paint(DIRT, 36, 12, 5, 15);
+        reserve(1, 28, COLS - 2, 3);
+        reserve(16, 11, 3, 17);
+        reserve(37, 11, 3, 17);
+        reserve(12, 7, 32, 2);               // lane in front of the pumps
+
+        // station front: garage shutters, shop crates
+        putLeft(GARAGE_GATE, 13, 3);
+        putLeft(GARAGE_GATE, 15, 3);
+        putLeft(CRATE_STACK, 18, 2);
+        putLeft(METAL_STACK, 20, 2);
+        putLeft(SIGN_EXIT, 24, 2);
+        putLeft(METAL_STACK_OPEN, 36, 2);
+        putLeft(CRATE_STACK, 38, 2);
+        putLeft(GARAGE_GATE, 40, 3);
+        // two pump islands and a burnt one
+        putLeft(PUMP_ROW, 14, 6);
+        putLeft(PUMP_ROW, 23, 6);
+        putLeft(PUMP_ROW_BURNT, 32, 6);
+        putLeft(CAR_BLUE_V, 20, 10);
+        putLeft(CAR_RED_H, 28, 10);
+        putLeft(CAR_BURNT_V, 41, 10);
+        putTile(BARREL_RED, 13, 10);
+        putTile(BARREL_ORANGE, 12, 10);
+        putLeft(TOOLBOXES, 33, 10);
+        putTile(GAS_TANK, 31, 10);
+
+        // the road: abandoned traffic
+        putLeft(VAN_BURNT_H, 3, 27);
+        putLeft(CAR_RED_H, 9, 31);
+        putLeft(CAR_BURNT_H, 23, 27);
+        putLeft(VAN_BLUE_H, 30, 31);
+        putLeft(CAR_BURNT_H, 45, 27);
+        putLeft(CAR_RED_H, 50, 31);
+        putLeft(STOP_SIGN, 14, 26);
+        putLeft(SIGN_DANGER, 42, 26);
+
+        // west: tyre shop yard; east: fuel depot with barrels; south of road: junk
+        putLeft(TIRES, 2, 4);
+        putLeft(TIRES_LOW, 3, 4);
+        putLeft(TIRES, 2, 7);
+        putLeft(TIRES_G, 5, 7);
+        putLeft(TIRES_LOW_G, 7, 4);
+        putLeft(CAR_BURNT_V, 9, 6);
+        putLeft(CRATE_WOOD_G, 3, 11);
+        putLeft(CRATE_STACK_G, 5, 13);
+        putLeft(PUMP_BURNT, 9, 14);
+        putLeft(BARREL_STACK, 46, 4);
+        putLeft(BARREL_STACK, 49, 4);
+        putLeft(GAS_TANK, 52, 4);
+        putLeft(BARREL_OIL, 46, 8);
+        putLeft(BARREL_OIL, 47, 8);
+        putLeft(BARREL_RED_G, 50, 8);
+        putLeft(METAL_STACK_G, 46, 13);
+        putLeft(PUMP_G, 51, 13);
+        scatter(new PropDef[]{CRATE_WOOD, BARREL_ORANGE_G, TIRES_LOW, CRATE_METAL}, 2, 16, 10, 9, 6, 60);
+        scatter(new PropDef[]{CRATE_METAL_G, BARREL_RED, TIRES_G}, 43, 16, 11, 9, 6, 60);
+        scatter(new PropDef[]{TIRES_LOW_G, CRATE_WOOD_G, BARREL_ORANGE, FENCE_BROKEN_A}, 2, 33, 52, 2, 8, 80);
+        sandPatches(6);
+    }
+
+    // ------------------------------------------------------------------ map 5: quarantine zone
+    private void buildQuarantine() {
+        // dirt paths link four fenced compounds to the camp
+        paint(DIRT, 1, 17, COLS - 2, 3);
+        paint(DIRT, 26, 1, 4, ROWS - 2);
+        reserve(1, 17, COLS - 2, 3);
+        reserve(26, 1, 4, ROWS - 2);
+
+        // north-west compound: field hospital
+        compound(3, 3, 6, 10, 2);
+        putLeft(TENT_GREEN, 4, 7);
+        putLeft(TENT_GREEN_FLAT, 7, 7);
+        putLeft(TENT_GREEN, 12, 7);
+        putLeft(TENT_GREEN_FLAT, 15, 7);
+        putLeft(WATER_TANK_V, 19, 6);
+        putTile(COT_V, 5, 11);
+        putTile(COT_V, 7, 11);
+        putTile(COT_H, 13, 11);
+        putLeft(BOX_MEDS, 16, 11);
+        putLeft(SIGN_QUARANTINE, 10, 14);
+
+        // north-east compound: supply depot
+        compound(33, 3, 6, 10, 2);
+        putLeft(METAL_STACK, 34, 6);
+        putLeft(METAL_STACK_OPEN, 37, 6);
+        putLeft(CRATE_CLUSTER, 41, 6);
+        putLeft(BARREL_STACK, 45, 6);
+        putLeft(AMMO_CRATE_H, 48, 6);
+        putLeft(BOX_AMMO, 34, 10);
+        putLeft(AMMO_CRATE_V, 37, 11);
+        putLeft(PALLET, 44, 10);
+        putLeft(BOX_TOOLS, 47, 10);
+        putLeft(SIGN_KEEP_OUT, 40, 14);
+
+        // south-west compound: contamination dump
+        compound(3, 22, 6, 9, 2);
+        putLeft(BARREL_OIL, 5, 25);
+        putLeft(BARREL_OIL, 6, 25);
+        putLeft(BARREL_GREY, 7, 25);
+        putLeft(GAS_TANK, 12, 25);
+        putLeft(BARREL_OIL, 16, 25);
+        putLeft(SIGN_TOXIC, 19, 25);
+        putLeft(TRASH_C, 5, 29);
+        putLeft(TRASH_B, 13, 29);
+        putLeft(TRASH_A, 17, 28);
+        putLeft(SIGN_WARNING, 9, 32);
+
+        // south-east compound: decontamination sheds
+        compound(33, 22, 6, 9, 2);
+        putLeft(SHED, 34, 26);
+        putLeft(STALL_A, 38, 26);
+        putLeft(SHED, 42, 26);
+        putLeft(STALL_B, 46, 26);
+        putLeft(WATER_TANK_H, 50, 25);
+        putLeft(BOX_EXTINGUISHER, 35, 29);
+        putLeft(SIDE_TABLE, 44, 29);
+        putLeft(SIGN_ELECTRIC, 49, 29);
+
+        // checkpoint signs and debris along the paths
+        putLeft(SIGN_SHELTER, 23, 15);
+        putLeft(SIGN_WARNING, 31, 15);
+        putLeft(CRATE_METAL, 22, 22);
+        putLeft(BARREL_GREY, 32, 22);
+        putLeft(SIGN_QUARANTINE, 50, 15);
+        putLeft(SIGN_QUARANTINE, 2, 15);
+        decal(PAPERS, 28 * T, 9 * T);
+        decal(PAPERS_B, 14 * T, 18 * T);
+        decal(SACK, 40 * T, 20 * T);
+        sandPatches(8);
+    }
+
+    /**
+     * A chain-link compound: `panels` fence panels (3 tiles each) along the north and south sides,
+     * one-tile posts down the sides, and a gate gap of `gate` panels in the middle of the
+     * side that faces the main path.
+     */
+    private void compound(int col, int row, int panels, int height, int gate) {
+        int width = panels * 3;
+        int gateStart = (panels - gate) / 2;
+        boolean south = row < ROWS / 2;   // northern compounds open to the south, southern to the north
+        for (int i = 0; i < panels; i++) {
+            boolean isGate = i >= gateStart && i < gateStart + gate;
+            if (!(south && isGate)) {
+                fencePanel(col + i * 3, row + height, false);
+            }
+            if (!(!south && isGate)) {
+                fencePanel(col + i * 3, row, i == 1);
+            }
+        }
+        fencePost(col * T, row, height);
+        fencePost((col + width) * T - 6, row, height);
+    }
+
+    // chain-link fence pieces from the camp sheet
+    private static final PropDef CHAIN_PANEL = new PropDef("fence", CAMP, 16, 16, 96, 36, 6, 0);
+    private static final PropDef CHAIN_PANEL_SIGN = new PropDef("fence", CAMP, 16, 80, 96, 32, 6, 0);
+
+    /** One chain-link panel, 3 tiles wide, standing on the bottom of tile row `row`. */
+    private void fencePanel(int col, int row, boolean withSign) {
+        PropDef d = withSign ? CHAIN_PANEL_SIGN : CHAIN_PANEL;
+        put(d, col * T + d.w / 2.0, (row + 1) * T - 2);
+    }
+
+    /**
+     * The left or right side of a compound: a run of fence posts from the north panel down to the
+     * south panel, drawn as one tall prop so it sorts correctly. x is the post's left edge.
+     */
+    private void fencePost(int x, int row, int height) {
+        BufferedImage seg = AssetLoader.subImage(CAMP, 16, 50, 6, 30);
+        int top = (row + 1) * T - 8;
+        int bottom = (row + height + 1) * T - 32;
+        BufferedImage img = new BufferedImage(6, bottom - top, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = img.createGraphics();
+        for (int y = 0; y < img.getHeight(); y += seg.getHeight()) {
+            g.drawImage(seg, 0, y, null);
+        }
+        g.dispose();
+        Rectangle solid = new Rectangle(x, top, 6, bottom - top);
+        if (!playArea.contains(solid)) {
+            return;
+        }
+        Prop p = new Prop("fence post", new BufferedImage[]{img}, 1, x, top, solid, bottom);
+        props.add(p);
+        addSolid(solid);
+    }
+
+    /** Small irregular dirt patches so the open sand does not look like one repeated tile. */
+    private void sandPatches(int count) {
+        for (int i = 0; i < count; i++) {
+            int w = 2 + rng.nextInt(3), h = 2 + rng.nextInt(2);
+            int col = 2 + rng.nextInt(COLS - 4 - w), row = 2 + rng.nextInt(ROWS - 4 - h);
+            paint(DIRT, col, row, w, h);
+            if (rng.nextBoolean()) {
+                paint(DIRT, col + 1, row + h, Math.max(1, w - 1), 1);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ ground rendering
+    private BufferedImage tile(String sheet, int x, int y) {
+        return AssetLoader.subImage(sheet, x, y, T, T);
+    }
+
+    private void renderGround() {
+        ground = new BufferedImage(COLS * T, ROWS * T, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = ground.createGraphics();
+        BufferedImage[] sand = variants(tile(WASTE, 32, 32), tile(WASTE, 224, 64));
+        BufferedImage[] sandRare = variants(tile(WASTE, 224, 0), tile(WASTE, 224, 32));
+        BufferedImage[] dirt = {tile(WASTE, 160, 0), AssetLoader.flipHorizontal(tile(WASTE, 160, 0)),
+            tile(WASTE, 192, 0), tile(WASTE, 192, 32), tile(WASTE, 160, 32)};
+        BufferedImage[] floor = variants(tile(INTER, 224, 32), tile(INTER, 224, 64));
+        BufferedImage[] floorRare = variants(tile(INTER, 224, 96), tile(INTER, 96, 192));
+        Map<Integer, BufferedImage> dirtEdges = new HashMap<>();
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                BufferedImage img;
+                int roll = rng.nextInt(100);
+                if (terrain[r][c] == FLOOR) {
+                    img = roll < 85 ? floor[roll % floor.length] : floorRare[roll % floorRare.length];
+                } else if (terrain[r][c] == DIRT) {
+                    int mask = sandMask(c, r);
+                    if (mask == 0) {
+                        img = dirt[roll < 60 ? roll % 2 : 2 + roll % 3];
+                    } else {
+                        BufferedImage base = dirt[roll % 2];
+                        int key = mask * 2 + (roll % 2);
+                        img = dirtEdges.get(key);
+                        if (img == null) {
+                            img = buildDirtEdge(base, mask);
+                            dirtEdges.put(key, img);
+                        }
+                    }
+                } else {
+                    img = roll < 92 ? sand[roll % sand.length] : sandRare[roll % sandRare.length];
+                }
+                g.drawImage(img, c * T, r * T, null);
+            }
+        }
+        for (int[] d : decals) {
+            PropDef def = decalDefs.get(d[0]);
+            g.drawImage(def.images()[0], d[1], d[2], null);
+        }
+        if (type == GameData.MapType.ABANDONED_BUNKER) {
+            drawWalls(g);
+        } else {
+            drawFenceBorder(g);
+        }
+        g.dispose();
+    }
+
+    /** A tile and its mirror images, so a few source tiles give many different-looking cells. */
+    private static BufferedImage[] variants(BufferedImage a, BufferedImage b) {
+        return new BufferedImage[]{a, b, AssetLoader.flipHorizontal(a), AssetLoader.flipHorizontal(b),
+            AssetLoader.flipVertical(a), AssetLoader.flipVertical(b)};
+    }
+
+    private boolean isSandAt(int c, int r) {
+        if (c < 0 || r < 0 || c >= COLS || r >= ROWS) {
+            return false;   // outside counts as dirt so roads run cleanly into the border
+        }
+        return terrain[r][c] == SAND;
+    }
+
+    /** Bits: 1=N 2=E 4=S 8=W sand neighbours, 16=NE 32=SE 64=SW 128=NW sand corner (inner corners). */
+    private int sandMask(int c, int r) {
+        int m = 0;
+        if (isSandAt(c, r - 1)) m |= 1;
+        if (isSandAt(c + 1, r)) m |= 2;
+        if (isSandAt(c, r + 1)) m |= 4;
+        if (isSandAt(c - 1, r)) m |= 8;
+        if ((m & 3) == 0 && isSandAt(c + 1, r - 1)) m |= 16;
+        if ((m & 6) == 0 && isSandAt(c + 1, r + 1)) m |= 32;
+        if ((m & 12) == 0 && isSandAt(c - 1, r + 1)) m |= 64;
+        if ((m & 9) == 0 && isSandAt(c - 1, r - 1)) m |= 128;
+        return m;
+    }
+
+    /**
+     * Builds a dirt tile with a sand lip on every side that touches sand. The sheet only has the
+     * lip for the north side, so the other sides are that overlay rotated or flipped, and an inner
+     * corner is the part where two side overlays overlap.
+     */
+    private static BufferedImage buildDirtEdge(BufferedImage base, int mask) {
+        BufferedImage north = northLipOverlay();
+        BufferedImage[] side = {north, AssetLoader.rotate90(north, true), AssetLoader.flipVertical(north),
+            AssetLoader.rotate90(north, false)};
+        BufferedImage out = new BufferedImage(T, T, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        g.drawImage(base, 0, 0, null);
+        for (int s = 0; s < 4; s++) {
+            if ((mask & (1 << s)) != 0) {
+                g.drawImage(side[s], 0, 0, null);
+            }
+        }
+        // inner corners: NE = N and E overlap, SE = S and E, SW = S and W, NW = N and W
+        int[][] corners = {{16, 0, 1}, {32, 2, 1}, {64, 2, 3}, {128, 0, 3}};
+        for (int[] cn : corners) {
+            if ((mask & cn[0]) != 0) {
+                g.drawImage(overlap(side[cn[1]], side[cn[2]]), 0, 0, null);
+            }
+        }
+        g.dispose();
+        return out;
+    }
+
+    private static BufferedImage northLip;
+
+    /**
+     * The sand band of the sheet's "dirt below sand" tile with the dirt made transparent.
+     * Only pixels connected to the top row are kept, so stray specks inside the dirt are dropped.
+     */
+    private static synchronized BufferedImage northLipOverlay() {
+        if (northLip != null) {
+            return northLip;
+        }
+        BufferedImage src = AssetLoader.subImage(WASTE, 32, 64, T, T);
+        boolean[][] keep = new boolean[T][T];
+        ArrayDeque<int[]> queue = new ArrayDeque<>();
+        for (int x = 0; x < T; x++) {
+            if ((src.getRGB(x, 0) & 0xFFFFFF) != DIRT_RGB) {
+                keep[0][x] = true;
+                queue.add(new int[]{x, 0});
+            }
+        }
+        while (!queue.isEmpty()) {
+            int[] p = queue.poll();
+            for (int[] d : new int[][]{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}) {
+                int nx = p[0] + d[0], ny = p[1] + d[1];
+                if (nx >= 0 && ny >= 0 && nx < T && ny < T && !keep[ny][nx]
+                        && (src.getRGB(nx, ny) & 0xFFFFFF) != DIRT_RGB) {
+                    keep[ny][nx] = true;
+                    queue.add(new int[]{nx, ny});
+                }
+            }
+        }
+        northLip = new BufferedImage(T, T, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < T; y++) {
+            for (int x = 0; x < T; x++) {
+                if (keep[y][x]) {
+                    northLip.setRGB(x, y, src.getRGB(x, y));
+                }
+            }
+        }
+        return northLip;
+    }
+
+    /** Pixels of a that are also covered in b (used for the small sand notch of an inner corner). */
+    private static BufferedImage overlap(BufferedImage a, BufferedImage b) {
+        BufferedImage out = new BufferedImage(T, T, BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < T; y++) {
+            for (int x = 0; x < T; x++) {
+                if ((a.getRGB(x, y) >>> 24) != 0 && (b.getRGB(x, y) >>> 24) != 0) {
+                    out.setRGB(x, y, a.getRGB(x, y));
+                }
+            }
+        }
+        return out;
+    }
+
+    // walls (bunker): light top surface with a dark outline, front faces with a baseboard
+    private static final int WALL_LINE = 0xFF1F2E33;
+
+    private boolean isWall(int c, int r) {
+        if (c < 0 || r < 0 || c >= COLS || r >= ROWS) {
+            return true;
+        }
+        return wall[r][c];
+    }
+
+    private void drawWalls(Graphics2D g) {
+        BufferedImage top = tile(INTER, 32, 48);
+        BufferedImage face = tile(INTER, 32, 160);
+        BufferedImage[] faceDeco = {tile(INTER, 160, 96), tile(INTER, 192, 96), tile(INTER, 160, 128)};
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                if (!wall[r][c]) {
+                    continue;
+                }
+                int x = c * T, y = r * T;
+                boolean front = !isWall(c, r + 1);
+                if (front) {
+                    BufferedImage img = (r <= 2 && rng.nextInt(5) == 0) ? faceDeco[rng.nextInt(faceDeco.length)] : face;
+                    g.drawImage(img, x, y, null);
+                    if (!isWall(c, r - 1)) {
+                        g.drawImage(top.getSubimage(0, 0, T, 8), x, y, null);
+                        line(g, x, y, T, 2);
+                    }
+                    if (!isWall(c - 1, r)) {
+                        line(g, x, y, 2, T);
+                    }
+                    if (!isWall(c + 1, r)) {
+                        line(g, x + T - 2, y, 2, T);
+                    }
+                } else {
+                    g.drawImage(top, x, y, null);
+                    if (!isWall(c, r - 1)) {
+                        line(g, x, y, T, 2);
+                    }
+                    if (!isWall(c - 1, r)) {
+                        line(g, x, y, 2, T);
+                    }
+                    if (!isWall(c + 1, r)) {
+                        line(g, x + T - 2, y, 2, T);
+                    }
+                    if (!isWall(c, r + 1)) {
+                        line(g, x, y + T - 2, T, 2);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void line(Graphics2D g, int x, int y, int w, int h) {
+        g.setColor(new Color(WALL_LINE, true));
+        g.fillRect(x, y, w, h);
+    }
+
+    /** Outdoor maps: a chain-link (or palisade) fence around the whole arena. */
+    private void drawFenceBorder(Graphics2D g) {
+        boolean palisade = type == GameData.MapType.SURVIVOR_CAMP;
+        BufferedImage panel = palisade ? AssetLoader.subImage(CAMP, 304, 721, 32, 63)
+                : AssetLoader.subImage(CAMP, 16, 16, 96, 36);
+        BufferedImage post = AssetLoader.subImage(CAMP, 16, 50, 6, 30);
+        // top and bottom rows
+        int step = palisade ? 24 : panel.getWidth();
+        for (int x = -4; x < COLS * T; x += step) {
+            if (palisade) {
+                g.drawImage(panel, x, T - panel.getHeight() + 6, null);
+            } else {
+                g.drawImage(panel, x, T - panel.getHeight() + 2, null);
+            }
+        }
+        for (int x = -4; x < COLS * T; x += step) {
+            int y = ROWS * T - panel.getHeight() + (palisade ? 4 : 0);
+            g.drawImage(panel, x, y, null);
+        }
+        // left and right columns
+        for (int y = 0; y < ROWS * T; y += post.getHeight()) {
+            if (palisade) {
+                BufferedImage log = AssetLoader.subImage(CAMP, 347, 726, 11, 58);
+                g.drawImage(log, T - 14, y, null);
+                g.drawImage(log, COLS * T - T + 3, y, null);
+            } else {
+                g.drawImage(post, T - 6, y, null);
+                g.drawImage(post, COLS * T - T, y, null);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ analysis after building
+    private void computeWalkable() {
+        walkable = new boolean[ROWS][COLS];
+        Rectangle probe = new Rectangle();
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                probe.setBounds(c * T + 6, r * T + 10, T - 12, 12);
+                walkable[r][c] = !isBlocked(probe);
+            }
+        }
+    }
+
+    /** Spawn points: tiles within 3 tiles of the border, roomy enough for the boss, reachable from camp. */
+    private void findSpawnPoints() {
+        int[][] fromCamp = new int[ROWS][COLS];
+        fillDistances(fromCamp, playerSpawn.x / T, playerSpawn.y / T);
+        Rectangle bossFeet = new Rectangle();
+        for (int r = 1; r < ROWS - 1; r++) {
+            for (int c = 1; c < COLS - 1; c++) {
+                boolean nearEdge = r <= 3 || c <= 3 || r >= ROWS - 4 || c >= COLS - 4;
+                if (!nearEdge || fromCamp[r][c] == FAR) {
+                    continue;
+                }
+                bossFeet.setBounds(c * T + 4, r * T + 12, T - 8, 12);
+                if (!isBlocked(bossFeet)) {
+                    spawnPoints.add(new Point(c * T + T / 2, r * T + T / 2 + 2));
+                }
+            }
+        }
+        if (spawnPoints.isEmpty()) {
+            spawnPoints.add(new Point(playerSpawn));   // never happens with the built-in maps
+        }
+    }
+
+    private void renderMinimap() {
+        minimap = new BufferedImage(COLS, ROWS, BufferedImage.TYPE_INT_ARGB);
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                int rgb;
+                if (wall[r][c] || r == 0 || c == 0 || r == ROWS - 1 || c == COLS - 1) {
+                    rgb = 0xFF2A2A30;
+                } else if (!walkable[r][c]) {
+                    rgb = 0xFF5A4636;
+                } else if (terrain[r][c] == FLOOR) {
+                    rgb = 0xFF8EA39D;
+                } else if (terrain[r][c] == DIRT) {
+                    rgb = 0xFFAD7757;
+                } else {
+                    rgb = 0xFFC09473;
+                }
+                minimap.setRGB(c, r, rgb);
+            }
+        }
+    }
+}
