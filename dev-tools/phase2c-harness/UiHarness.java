@@ -1,4 +1,4 @@
-package Project3_XXX;
+package Project3_6813107;
 
 import java.awt.*;
 import java.awt.event.*;
@@ -162,7 +162,7 @@ public class UiHarness {
         check(name.getText().equals("Alex_01"), "name trimmed");
 
         // fake scores in the temp working dir, then come back
-        File scores = new File("Project3_XXX/highscores.txt");
+        File scores = new File("Project3_6813107/highscores.txt");
         String[][] rows = {{"Alex_01", "Soldier", "Gas Station", "4120", "131", "7", "245"},
                 {"Bea", "Medic", "Survivor Camp", "6900", "212", "10", "300"},
                 {"Chai", "Scout", "Quarantine Zone", "880", "30", "2", "61"},

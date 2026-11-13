@@ -1,5 +1,5 @@
-import Project3_XXX.GameData;
-import Project3_XXX.GameMap;
+import Project3_6813107.GameData;
+import Project3_6813107.GameMap;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;

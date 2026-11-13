@@ -1,4 +1,4 @@
-import Project3_XXX.*;
+import Project3_6813107.*;
 import java.awt.*;
 import java.awt.image.BufferedImage;
 import java.io.File;
@@ -387,7 +387,7 @@ public class Sim {
     // ---------------------------------------------------------------- sounds
     static void sounds() throws Exception {
         System.out.println("== sounds");
-        File dir = new File("src/main/java/Project3_XXX/resources/sounds");
+        File dir = new File("src/main/java/Project3_6813107/resources/sounds");
         File[] files = dir.listFiles((d, n) -> n.endsWith(".wav"));
         Arrays.sort(files);
         long totalBytes = 0;

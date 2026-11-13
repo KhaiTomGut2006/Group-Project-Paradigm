@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>egco213</groupId>
-    <artifactId>Project3_XXX</artifactId>
+    <artifactId>Project3_6813107</artifactId>
     <version>1.0</version>
     <packaging>jar</packaging>
     <name>Last Camp Survivor</name>
@@ -13,7 +13,7 @@
     <properties>
         <maven.compiler.release>26</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <exec.mainClass>Project3_XXX.MainApplication</exec.mainClass>
+        <exec.mainClass>Project3_6813107.MainApplication</exec.mainClass>
     </properties>
 
     <build>

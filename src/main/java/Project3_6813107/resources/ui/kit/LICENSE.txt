@@ -1,0 +1,14 @@
+HOLLOW CREEK ASSET LICENSE
+
+You CAN:
+- Use these assets in personal and commercial projects (games, apps, videos, prototypes).
+- Modify the assets to fit your project.
+- Credit is appreciated but not required.
+
+You CANNOT:
+- Resell or redistribute these assets, original or modified, as assets
+  (e.g. in other asset packs, tilesets, or marketplaces), even for free.
+- Use these assets as NFTs.
+- Use these assets (or modified versions) to train AI / machine-learning models.
+
+Purchasing or downloading grants a license to use; ownership remains with the author.
