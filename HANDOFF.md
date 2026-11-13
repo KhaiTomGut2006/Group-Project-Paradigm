@@ -282,7 +282,26 @@ dev-tools/ui-harness/run.sh /tmp/ui-shots
 - **ไม่ได้ใช้** (ไม่มีกลไกในเกมรองรับ): status icon cold/hidden/hungry/thirsty/tired/noise/infected, preset bar (health_10 ฯลฯ ใช้วาด bar แบบ dynamic แทน), portrait_survivor, minimap_frame_round, inventory hotbar 6 ช่องแบบเต็ม (ใช้เฉพาะขอบ)
 
 ### งานต่อไปที่แนะนำ (เรียงลำดับ)
-1. รัน `HeadlessSim` (dev-tools/phase2b-harness) กับโค้ดปัจจุบันให้ผ่านก่อน
-2. `dev-tools/ui-harness/run.sh /tmp/shots` แล้วเปิดดูทุกภาพที่ยังไม่ได้ดู แก้บั๊กในรายการด้านบน
-3. เล่นจริงด้วยมือ + ตรวจบน Windows
-4. อัปเดตหัวข้อ 3 (ต้นไม้ไฟล์/จำนวนบรรทัด) และหัวข้อ 5 (handler) ถ้ามีการเปลี่ยน แล้วค่อย commit เมื่อเจ้าของสั่ง
+1. เล่นจริงด้วยมือ + ตรวจเสียงและ performance บน Windows
+2. ค่อย commit เมื่อเจ้าของสั่ง
+
+---
+
+## 11. อัปเดตเพิ่มเติม (2026-11-14) — Scavenge, Base Building, Camp NPCs & Horde Raids
+
+ปรับ loop เกมจากการกัน wave อย่างเดียวเป็น **ออกไปยิงซอมบี้/เปิด Supply Chest รอบแผนที่ → กลับมาที่ฐานคุยกับ NPC (`[B]`) เพื่อคราฟต์อาวุธ/อัปเกรด/รักษา/สร้างสิ่งปลูกสร้าง → ป้องกัน Horde Raid เป็นระยะ**:
+
+1. **`GameData.java` & `Player.java`**:
+   - เพิ่มสูตรคราฟต์/สร้างฐาน 5 รายการใน `RecipeKind` และ `RECIPES`:
+     - `Build Guard Post` (`BASE_TURRET`, max Lv.4): ตั้งจุดยิง NPC Guard รอบฐาน ยิงซอมบี้ที่เข้าใกล้
+     - `Fortify Base Walls` (`BASE_WALL`, max Lv.3): สร้างแนวป้องกันรอบค่าย และลดความเสียหายที่ได้รับในฐาน (-15%/lv)
+     - `Build Medical Tent` (`BASE_MEDIC`, max Lv.3): ฟื้นเลือดอัตโนมัติและแก้พิษเมื่อยืนอยู่ในฐาน
+     - `Build Supply Depot` (`BASE_FARM`, max Lv.3): แปลงผักและคลังกระสุนที่ฐาน ผลิต `Ammo` / `Food` / `Medkit` ให้เก็บเป็นระยะ
+     - `Doctor Treatment` (`HEAL_NOW`): จ่าย `Food` + `Scraps` เพื่อรักษา +65 HP และแก้พิษทันทีในฐาน
+2. **`GameMap.java` & `Monster.java`**:
+   - `GameMap.applyBaseUpgrades(...)`: วางสิ่งก่อสร้างจริง (กำแพงลังไม้/ยาง/ถังน้ำมัน, NPC Guard, เต็นท์พยาบาล/เตียง, แปลงข้าวโพด/ข้าวสาลี/กล่องเสบียง) ใน/รอบ `campArea` พร้อมคำนวณ walkability และ minimap ใหม่
+   - `Monster`: แยกระหว่าง `raiding` (มอนสเตอร์บุกฐานและบอส) กับมอนสเตอร์รอบนอกที่เดินลาดตระเวน (`wanderOuterZone`) ไม่เดินเข้าฐานช่วง Scavenge และจะไล่ตามเมื่อผู้เล่นเข้าไปในระยะตรวจจับหรือยิงโดน
+3. **`GamePanel.java`, `GameFrame.java`, `UpgradeDialog.java`, `MainApplication.java`**:
+   - สลับช่วง `SCAVENGE` และ `HORDE RAID` ภายในแต่ละรอบ 30 วินาที พร้อมเกิด Supply Chest รอบนอกให้ไปเก็บ
+   - กด `B` / ปุ่ม `BASE NPC` ได้เมื่อเดินกลับมาในเขต `campArea` (นอกเขตจะขึ้นข้อความเตือนให้กลับฐาน)
+   - `UpgradeDialog` เปลี่ยนบทพูด NPC ตามประเภท (Gunsmith / Engineer / Medic / Trainer) และปุ่มคำสั่ง (`CRAFT` / `BUILD` / `HEAL NOW`)

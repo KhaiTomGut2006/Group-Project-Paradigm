@@ -10,8 +10,10 @@ Natthanon Achachan          6813241
 What the game is
 ----------------
 A 2D top-down zombie survival game written with Java Swing (javax.swing, java.awt,
-javax.sound.sampled, javax.imageio only). Walk with W A S D, aim with the mouse, kill the
-horde, pick up the loot it drops and craft new weapons and upgrades in the workshop (B).
+javax.sound.sampled, javax.imageio only). Walk with W A S D, aim with the mouse, scavenge
+outside the camp to hunt roaming zombies and open Supply Chests, then return to Base Camp
+(press B) to talk to camp NPCs: craft weapons, upgrade stats, heal wounds, and build Guard
+Posts, Fortified Walls, a Medical Tent, and a Supply Depot before periodic Horde Raids hit.
 Survive 5 minutes to win.
 
 How to run

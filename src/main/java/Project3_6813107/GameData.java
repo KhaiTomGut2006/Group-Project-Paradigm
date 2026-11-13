@@ -436,6 +436,11 @@ public final class GameData {
         SPEED(0.08),        // +8% move speed per level
         ARMOR(0.08),        // 8% less damage taken per level
         MAGNET(0.25),       // +25% pickup radius per level
+        BASE_TURRET(1),     // +1 armed NPC guard post at the base perimeter
+        BASE_WALL(0.15),    // barricades around camp and -15% damage taken inside base per level
+        BASE_MEDIC(2),      // camp medical tent: passive HP regen & poison cure inside base
+        BASE_FARM(1),       // camp farm & supply depot: spawns supplies at base periodically
+        HEAL_NOW(65),       // instant NPC doctor treatment (+65 HP & cures poison)
         MEDKIT(1);          // +1 medkit per craft
 
         public final double perLevel;
@@ -488,7 +493,7 @@ public final class GameData {
         }
     }
 
-    /** The 12 workshop recipes: 5 weapon crafts, 6 stat upgrades and 1 consumable. */
+    /** The workshop recipes: weapon crafts, stat upgrades, base buildings, and NPC medical services. */
     public static final List<UpgradeRecipe> RECIPES = Collections.unmodifiableList(createRecipes());
 
     private static List<UpgradeRecipe> createRecipes() {
@@ -520,6 +525,16 @@ public final class GameData {
                 RecipeKind.ARMOR, 5, null, null, ItemType.STEEL, 2, ItemType.ARMOR_VEST, 1));
         list.add(new UpgradeRecipe("Upgrade Loot Magnet", "+25% item pickup radius.",
                 RecipeKind.MAGNET, 4, null, null, ItemType.ELECTRONICS, 2, ItemType.BATTERY, 1));
+        list.add(new UpgradeRecipe("Build Guard Post", "Station an armed NPC guard at base perimeter to shoot zombies.",
+                RecipeKind.BASE_TURRET, 4, null, null, ItemType.SCRAPS, 4, ItemType.WOOD, 3, ItemType.STEEL, 1));
+        list.add(new UpgradeRecipe("Fortify Base Walls", "Build camp barricades and reduce damage inside base (-15%/lv).",
+                RecipeKind.BASE_WALL, 3, null, null, ItemType.WOOD, 4, ItemType.SCRAPS, 3, ItemType.STEEL, 1));
+        list.add(new UpgradeRecipe("Build Medical Tent", "Medical station at base: heals HP & cures poison while inside camp.",
+                RecipeKind.BASE_MEDIC, 3, null, null, ItemType.FOOD, 2, ItemType.WOOD, 2, ItemType.SCRAPS, 2));
+        list.add(new UpgradeRecipe("Build Supply Depot", "Camp farm & ammo depot: drops Food, Ammo, or Medkits at base.",
+                RecipeKind.BASE_FARM, 3, null, null, ItemType.WOOD, 3, ItemType.FOOD, 2, ItemType.SCRAPS, 3));
+        list.add(new UpgradeRecipe("Doctor Treatment", "Camp medic treats wounds right now (+65 HP and cures poison).",
+                RecipeKind.HEAL_NOW, 0, null, null, ItemType.FOOD, 2, ItemType.SCRAPS, 1));
         list.add(new UpgradeRecipe("Craft Medkit", "One medkit (press E to heal).",
                 RecipeKind.MEDKIT, 0, null, null, ItemType.FOOD, 2, ItemType.SCRAPS, 1));
         return list;

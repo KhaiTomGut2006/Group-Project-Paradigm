@@ -332,6 +332,12 @@ public final class GameMap {
     private Rectangle campArea;          // world pixels
     private Point playerSpawn;
     private final List<Point> spawnPoints = new ArrayList<>();
+    private final List<Point> guardPosts = new ArrayList<>();
+    private Point traderPosition;
+    private int appliedTurretLv;
+    private int appliedWallLv;
+    private int appliedMedicLv;
+    private int appliedFarmLv;
     private boolean[][] walkable;
     private boolean[][] openEast;     // can walk from (c, r) to (c + 1, r)
     private boolean[][] openSouth;    // can walk from (c, r) to (c, r + 1)
@@ -449,6 +455,175 @@ public final class GameMap {
             copy.add(new Point(p));
         }
         return copy;
+    }
+
+    /** World coordinates of the camp trader/workshop NPC. */
+    public Point getTraderPosition() {
+        return traderPosition != null ? new Point(traderPosition) : new Point(playerSpawn);
+    }
+
+    /** Active automated guard post positions around the camp. */
+    public List<Point> getGuardPosts() {
+        List<Point> copy = new ArrayList<>();
+        for (Point p : guardPosts) {
+            copy.add(new Point(p));
+        }
+        return copy;
+    }
+
+    /** Random walkable tile at least 11 tiles outside the camp center (for roaming zombies & supply chests). */
+    public Point randomOuterLootPoint(Random random) {
+        double cx = campArea.getCenterX();
+        double cy = campArea.getCenterY();
+        for (int tries = 0; tries < 60; tries++) {
+            int col = 2 + random.nextInt(COLS - 4);
+            int row = 2 + random.nextInt(ROWS - 4);
+            if (!isWalkableTile(col, row)) {
+                continue;
+            }
+            double px = col * T + T / 2.0;
+            double py = row * T + T / 2.0;
+            if (Math.hypot(px - cx, py - cy) < 11.0 * T) {
+                continue;
+            }
+            Rectangle probe = new Rectangle((int) px - 10, (int) py - 8, 20, 16);
+            if (!isBlocked(probe)) {
+                return new Point((int) px, (int) py);
+            }
+        }
+        return new Point(spawnPoints.get(random.nextInt(spawnPoints.size())));
+    }
+
+    /**
+     * Dynamically places base structures (guard posts, walls, medical tent, farm/supply depot)
+     * in and around campArea as the player builds them at the camp NPCs. Returns true if anything changed.
+     */
+    public boolean applyBaseUpgrades(int turretLv, int wallLv, int medicLv, int farmLv) {
+        if (turretLv == appliedTurretLv && wallLv == appliedWallLv
+                && medicLv == appliedMedicLv && farmLv == appliedFarmLv) {
+            return false;
+        }
+        int c0 = campArea.x / T;
+        int r0 = campArea.y / T;
+        boolean structureChanged = false;
+
+        if (wallLv > appliedWallLv) {
+            if (appliedWallLv < 1 && wallLv >= 1) {
+                putCampTile(CRATE_WOOD, c0 + 2, r0 + 9, true);
+                putCampTile(BARREL_ORANGE, c0 + 3, r0 + 9, true);
+                putCampTile(BARREL_RED, c0 + 8, r0 + 9, true);
+                putCampTile(CRATE_METAL, c0 + 9, r0 + 9, true);
+            }
+            if (appliedWallLv < 2 && wallLv >= 2) {
+                putCampTile(TIRES, c0, r0 + 3, true);
+                putCampTile(CRATE_CLOSED, c0, r0 + 7, true);
+                putCampTile(TIRES, c0 + 11, r0 + 3, true);
+                putCampTile(CRATE_CLOSED, c0 + 11, r0 + 7, true);
+            }
+            if (appliedWallLv < 3 && wallLv >= 3) {
+                putCampTile(CRATE_METAL_G, c0 + 3, r0 + 8, true);
+                putCampTile(CRATE_METAL_G, c0 + 8, r0 + 8, true);
+                putCampTile(SIGN_KEEP_OUT, c0 + 5, r0 + 9, false);
+            }
+            appliedWallLv = wallLv;
+            structureChanged = true;
+        }
+
+        if (turretLv > appliedTurretLv) {
+            if (appliedTurretLv < 1 && turretLv >= 1) {
+                guardPosts.add(new Point((c0 + 1) * T + T / 2, (r0 + 5) * T + T / 2));
+                putCampTile(BARREL_GREY, c0 + 2, r0 + 5, false);
+            }
+            if (appliedTurretLv < 2 && turretLv >= 2) {
+                putCampTile(NPC_GUARD, c0 + 10, r0 + 5, true);
+                guardPosts.add(new Point((c0 + 10) * T + T / 2, (r0 + 5) * T + T / 2));
+            }
+            if (appliedTurretLv < 3 && turretLv >= 3) {
+                putCampTile(NPC_GUARD, c0 + 3, r0 + 7, true);
+                guardPosts.add(new Point((c0 + 3) * T + T / 2, (r0 + 7) * T + T / 2));
+            }
+            if (appliedTurretLv < 4 && turretLv >= 4) {
+                putCampTile(NPC_GUARD, c0 + 8, r0 + 7, true);
+                guardPosts.add(new Point((c0 + 8) * T + T / 2, (r0 + 7) * T + T / 2));
+            }
+            appliedTurretLv = turretLv;
+            structureChanged = true;
+        }
+
+        if (medicLv > appliedMedicLv) {
+            if (appliedMedicLv < 1 && medicLv >= 1) {
+                putCampTile(BOX_MEDS, c0 + 5, r0 + 3, false);
+                putCampTile(COT_H, c0 + 2, r0 + 3, false);
+            }
+            if (appliedMedicLv < 2 && medicLv >= 2) {
+                putCampTile(GURNEY_CURTAIN, c0 + 1, r0 + 3, true);
+                putCampTile(WATER_COOLER, c0 + 4, r0 + 3, false);
+            }
+            if (appliedMedicLv < 3 && medicLv >= 3) {
+                putCampTile(OP_TABLE, c0 + 3, r0 + 3, true);
+            }
+            appliedMedicLv = medicLv;
+            structureChanged = true;
+        }
+
+        if (farmLv > appliedFarmLv) {
+            if (appliedFarmLv < 1 && farmLv >= 1) {
+                putCampTile(PLANTER, c0 + 9, r0 + 3, false);
+                putCampTile(CROP_CORN, c0 + 10, r0 + 3, false);
+            }
+            if (appliedFarmLv < 2 && farmLv >= 2) {
+                putCampTile(CROP_WHEAT, c0 + 9, r0 + 4, false);
+                putCampTile(AMMO_CRATE_H, c0 + 10, r0 + 4, false);
+            }
+            if (appliedFarmLv < 3 && farmLv >= 3) {
+                putCampTile(BOX_AMMO, c0 + 8, r0 + 3, false);
+                putCampTile(BOX_SUPPLY, c0 + 7, r0 + 3, false);
+            }
+            appliedFarmLv = farmLv;
+            structureChanged = true;
+        }
+
+        if (structureChanged) {
+            flowCol = -1;
+            flowRow = -1;
+            computeWalkable();
+            renderMinimap();
+        }
+        return structureChanged;
+    }
+
+    private void putCampTile(PropDef d, int col, int row, boolean solidFootprint) {
+        double cx = col * T + T / 2.0;
+        double bottom = (row + 1) * T;
+        if (Math.hypot(cx - playerSpawn.x, bottom - playerSpawn.y) < 28) {
+            return;
+        }
+        int left = (int) Math.round(cx - d.w / 2.0);
+        int artBottom = (int) Math.round(bottom);
+        Rectangle solid = null;
+        if (solidFootprint && d.footH > 0) {
+            solid = new Rectangle(left + d.inset, artBottom - d.footH, d.w - 2 * d.inset, d.footH);
+            if (!playArea.contains(solid) || overlapsWall(solid)) {
+                return;
+            }
+            for (Rectangle s : solids) {
+                if (s.intersects(solid)) {
+                    solid = null; // still show visual prop without trapping player
+                    break;
+                }
+            }
+        }
+        BufferedImage[] imgs = d.images();
+        int drawY = artBottom + d.padBottom - imgs[0].getHeight();
+        int drawX = (int) Math.round(cx - imgs[0].getWidth() / 2.0);
+        Prop p = new Prop(d.name, imgs, d.ticksPerFrame, drawX, drawY, solid, artBottom);
+        props.add(p);
+        if (p.isAnimated()) {
+            animatedProps.add(p);
+        }
+        if (solid != null) {
+            addSolid(solid);
+        }
     }
 
     /** Draws only the visible part of the pre-rendered ground (world coordinates). */
@@ -788,6 +963,7 @@ public final class GameMap {
         putTile(TABLE_WORK, c0 + 4, r0 + 2);
         putTile(TABLE_MED, c0 + 5, r0 + 2);
         putTile(NPC_TRADER, c0 + 6, r0 + 2);
+        traderPosition = new Point((c0 + 6) * T + T / 2, (r0 + 2) * T + T / 2);
         putTile(DESK_RADIO, c0 + 7, r0 + 2);
         putLeft(indoor ? SHELF_STOCKED : TENT_GREEN, c0 + 8, r0 + 2);
         putLeft(indoor ? RACK_STOCKED : BOX_SUPPLY, c0 + 10, r0 + 2);

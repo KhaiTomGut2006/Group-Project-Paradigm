@@ -112,6 +112,7 @@ public final class GamePanel extends JPanel
     private volatile int killScore;
     private int bossTimer;                     // > 0: a boss walks in when it reaches 0
     private int gameOverTimer;
+    private boolean raidActive;
     private transient volatile Banner banner;
 
     // ------------------------------------------------------------------ input (set on the Swing thread, read by the game thread)
@@ -216,7 +217,24 @@ public final class GamePanel extends JPanel
         }
         updateCamera(1.0);   // start centred on the player
         preloadSprites();
-        showBanner("WAVE 1", "Survive " + formatTime(GameData.TIME_LIMIT_SECONDS) + "  -  B opens the workshop", BANNER_WAVE);
+        spawnInitialScavengeWorld();
+        showBanner("SCAVENGE & FORTIFY", "Loot outer zones, press B at camp to build & heal", BANNER_WAVE);
+    }
+
+    /** Populates outer map zones with roaming zombies and supply chests right at run start. */
+    private void spawnInitialScavengeWorld() {
+        for (int i = 0; i < 3; i++) {
+            Point p = map.randomOuterLootPoint(rng);
+            DroppedItem chest = new DroppedItem(GameData.ItemType.CHEST, 1, p.x, p.y, player);
+            chest.setMap(map);
+            drops.add(chest);
+        }
+        for (int i = 0; i < 6; i++) {
+            Point p = map.randomOuterLootPoint(rng);
+            Monster m = new Monster(GameData.MonsterType.ZOMBIE_NORMAL, p.x, p.y, map, player, GameData.monsterHpScale(1, getDifficulty()));
+            m.setRaiding(false);
+            monsters.add(m);
+        }
     }
 
     /**
@@ -379,6 +397,7 @@ public final class GamePanel extends JPanel
             }
             spawnPendingMonsters();
             updatePlayer();
+            updateBaseSystems();
             map.update();
             updateMonsters();
             updateBullets();
@@ -391,7 +410,7 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Survival time, wave changes, the boss timer and the win. */
+    /** Survival time, wave changes, Scavenge/Raid phase transitions, boss timer and win. */
     private void updateClock() {
         if (!player.isAlive()) {
             return;   // the clock stops while the death animation plays
@@ -405,6 +424,11 @@ public final class GamePanel extends JPanel
         if (newWave != wave) {
             startWave(newWave);
         }
+        int secInWave = getElapsedSeconds() % GameData.WAVE_SECONDS;
+        int raidStartSec = wave == 1 ? 16 : 14;
+        if (!raidActive && secInWave >= raidStartSec) {
+            startRaidPhase();
+        }
         if (bossTimer > 0 && --bossTimer == 0) {
             spawnBoss();
         }
@@ -412,14 +436,110 @@ public final class GamePanel extends JPanel
 
     private void startWave(int number) {
         wave = number;
+        raidActive = false;
+        spawnOuterSupplyChests(2);
         AssetLoader.playSound("wave");
         if (number % GameData.BOSS_EVERY_WAVES == 0) {
-            showBanner("WAVE " + number, "WARNING: a boss is coming!", BANNER_BOSS);
+            showBanner("WAVE " + number, "Scavenge fast - Boss & Raid approaching!", BANNER_BOSS);
             bossTimer = BOSS_WARNING_TICKS;
         } else if (number == GameData.TIME_LIMIT_SECONDS / GameData.WAVE_SECONDS) {
-            showBanner("FINAL WAVE", "Hold on for 30 more seconds!", BANNER_WAVE);
+            showBanner("FINAL WAVE", "Hold the base for 30 more seconds!", BANNER_WAVE);
         } else {
-            showBanner("WAVE " + number, "The horde grows stronger", BANNER_WAVE);
+            showBanner("WAVE " + number, "Scavenge outer zones or fortify base [B]", BANNER_WAVE);
+        }
+    }
+
+    private void startRaidPhase() {
+        raidActive = true;
+        AssetLoader.playSound("wave");
+        showBanner("HORDE RAID", "Return to base and hold the perimeter!", BANNER_BOSS);
+        for (Monster m : monsters) {
+            if (m.isAlive()) {
+                m.setRaiding(true);
+            }
+        }
+    }
+
+    private void spawnOuterSupplyChests(int desiredAdd) {
+        int currentChests = 0;
+        for (DroppedItem d : drops) {
+            if (d.getType() == GameData.ItemType.CHEST) {
+                currentChests++;
+            }
+        }
+        int toSpawn = Math.min(desiredAdd, Math.max(0, 5 - currentChests));
+        for (int i = 0; i < toSpawn; i++) {
+            Point p = map.randomOuterLootPoint(rng);
+            DroppedItem chest = new DroppedItem(GameData.ItemType.CHEST, 1, p.x, p.y, player);
+            chest.setMap(map);
+            drops.add(chest);
+        }
+    }
+
+    /** Active camp defenses & facilities: guard posts, medical tent regen, and supply depot production. */
+    private void updateBaseSystems() {
+        int turretLv = player.getLevel(GameData.RecipeKind.BASE_TURRET);
+        int wallLv = player.getLevel(GameData.RecipeKind.BASE_WALL);
+        int medicLv = player.getLevel(GameData.RecipeKind.BASE_MEDIC);
+        int farmLv = player.getLevel(GameData.RecipeKind.BASE_FARM);
+        if (map.applyBaseUpgrades(turretLv, wallLv, medicLv, farmLv)) {
+            solidRects.clear();
+            solidRects.addAll(map.getSolidRects());
+        }
+
+        if (turretLv > 0 && tickCount % Math.max(12, 32 - turretLv * 5) == 0 && bullets.size() < 320) {
+            double maxRange = 220.0 + turretLv * 20.0;
+            for (Point gp : map.getGuardPosts()) {
+                Monster best = null;
+                double bestDist = maxRange;
+                for (Monster m : monsters) {
+                    if (!m.isAlive()) {
+                        continue;
+                    }
+                    double d = Math.hypot(m.getX() - gp.x, m.getY() - gp.y);
+                    if (d < bestDist && map.hasClearPath(gp.x, gp.y, m.getX(), m.getY(), 4)) {
+                        bestDist = d;
+                        best = m;
+                    }
+                }
+                if (best != null) {
+                    double angle = Math.atan2(best.getY() - gp.y, best.getX() - gp.x);
+                    Bullet shot = Bullet.shot(gp.x, gp.y - 6, angle, GameData.WeaponType.RIFLE, 10 + turretLv * 5);
+                    shot.setMap(map);
+                    bullets.add(shot);
+                    addEffect(new Effect(Effect.Kind.IMPACT, gp.x + Math.cos(angle) * 10, gp.y - 6 + Math.sin(angle) * 10, 10, null, null, 14));
+                }
+            }
+        }
+
+        if (medicLv > 0 && player.isAlive() && tickCount % 75 == 0
+                && map.getCampArea().contains((int) player.getX(), (int) player.getY())) {
+            boolean wasPoisoned = player.isPoisoned();
+            int before = player.getHp();
+            player.heal(2 + medicLv * 2);
+            player.curePoison();
+            int gained = player.getHp() - before;
+            if (gained > 0 || wasPoisoned) {
+                addText(player.getX(), player.getY() - 24, gained > 0 ? "+" + gained + " Med Tent" : "Cured!", TEXT_LOOT);
+            }
+        }
+
+        if (farmLv > 0 && tickCount % Math.max(540, 1080 - farmLv * 180) == 0 && drops.size() < 200) {
+            Rectangle camp = map.getCampArea();
+            double sx = camp.x + camp.width - 72;
+            double sy = camp.y + 84;
+            int count = farmLv >= 3 ? 2 : 1;
+            for (int i = 0; i < count; i++) {
+                int roll = rng.nextInt(10);
+                GameData.ItemType itemType = roll < 5 ? GameData.ItemType.AMMO
+                        : (roll < 8 ? GameData.ItemType.FOOD : GameData.ItemType.MEDKIT);
+                int amount = itemType == GameData.ItemType.AMMO ? 12 + farmLv * 4 : 1;
+                DroppedItem sup = new DroppedItem(itemType, amount, sx, sy, player);
+                sup.setMap(map);
+                sup.scatter(rng);
+                drops.add(sup);
+            }
+            addText(sx, sy - 14, "+Base Supply", TEXT_LOOT);
         }
     }
 
@@ -437,10 +557,13 @@ public final class GamePanel extends JPanel
         pendingSpawns.addAndGet(-count);
     }
 
-    /** New monsters appear at a free spot near the map edge that the camera cannot see. */
+    /** New monsters appear outside camera view during raids, or in outer zones during scavenge phase. */
     private Monster spawnMonster(GameData.MonsterType type) {
-        Point p = map.randomSpawnPoint(rng, getCameraView());
+        boolean boss = type == GameData.MonsterType.ZOMBIE_BOSS;
+        boolean raid = raidActive || boss;
+        Point p = raid ? map.randomSpawnPoint(rng, getCameraView()) : map.randomOuterLootPoint(rng);
         Monster m = new Monster(type, p.x, p.y, map, player, GameData.monsterHpScale(wave, getDifficulty()));
+        m.setRaiding(raid);
         monsters.add(m);
         return m;
     }
@@ -824,6 +947,17 @@ public final class GamePanel extends JPanel
         return gameOver;
     }
 
+    public boolean isRaidPhase() {
+        return raidActive;
+    }
+
+    /** True when the player is inside or right at the entrance of the central Base Camp. */
+    public boolean isPlayerInBase() {
+        Rectangle baseZone = map.getCampArea();
+        baseZone.grow(28, 28);
+        return baseZone.contains((int) player.getX(), (int) player.getY());
+    }
+
     public void setAutoFire(boolean b) {
         autoFire = b;
     }
@@ -996,6 +1130,11 @@ public final class GamePanel extends JPanel
 
     private void openWorkshop() {
         if (frame != null && !gameOver && player.isAlive()) {
+            if (!isPlayerInBase()) {
+                player.showHint("Return to Base Camp (green icon) to talk to NPCs!");
+                AssetLoader.playSound("click");
+                return;
+            }
             // let this key event finish first; the modal dialog then runs its own event loop
             SwingUtilities.invokeLater(frame::openUpgradeDialog);
         }
@@ -1039,6 +1178,7 @@ public final class GamePanel extends JPanel
         g2.scale(SCALE, SCALE);
 
         map.drawGround(g2, view);
+        drawCampPerimeter(g2, view);
         collectVisible(view);
         drawList.sort(GameMap.DEPTH_ORDER);
         for (GameMap.Drawable d : drawList) {
@@ -1049,6 +1189,17 @@ public final class GamePanel extends JPanel
         }
         drawWorldEffects(g2);
         g2.setTransform(old);
+    }
+
+    /** Subtle perimeter outline around Base Camp (green during Scavenge safe phase, red/orange during Raid). */
+    private void drawCampPerimeter(Graphics2D g2, Rectangle view) {
+        Rectangle camp = map.getCampArea();
+        if (!camp.intersects(view)) {
+            return;
+        }
+        g2.setColor(raidActive ? new Color(220, 75, 55, 110) : new Color(110, 210, 120, 95));
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.drawRect(camp.x, camp.y, camp.width, camp.height);
     }
 
     /** Only things near the camera go into the sorted draw list. */
@@ -1106,8 +1257,15 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Damage numbers and pickup labels, drawn in screen pixels so the text stays sharp. */
+    /** Damage numbers, pickup labels, and base NPC interaction prompts in sharp screen pixels. */
     private void drawFloatingTexts(Graphics2D g2) {
+        Point trader = map.getTraderPosition();
+        if (!gameOver && getCameraView().contains(trader)) {
+            String prompt = isPlayerInBase() ? "PRESS B: CAMP NPCS - CRAFT / HEAL / BUILD" : "BASE CAMP NPCS";
+            int tx = trader.x * SCALE - originX - Theme.pixelWidth(prompt, 2) / 2;
+            int ty = Math.max(12, (trader.y - 20) * SCALE - originY);
+            Theme.drawPixelTextShadow(g2, prompt, tx, ty, 2, isPlayerInBase() ? Theme.GOLD : Theme.TEXT_2);
+        }
         Composite old = g2.getComposite();
         for (Effect e : effects) {
             if (e.kind != Effect.Kind.TEXT) {

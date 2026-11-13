@@ -50,6 +50,10 @@ public final class Monster extends Entity {
     private int strafeSign;
     private Bullet pendingShot;
     private int aimWarning;          // ticks of the "!" warning before a bandit fires
+    private boolean raiding;         // true = marching on base during Raid; false = outer-zone scavenger
+    private boolean provoked;        // true once hit by player or guard
+    private double wanderAngle;
+    private int wanderTimer;
 
     /**
      * @param hpMultiplier wave/difficulty scaling for health (1.0 = base value)
@@ -69,6 +73,9 @@ public final class Monster extends Entity {
         this.repathTimer = Math.floorMod(seed, 6);
         this.rangedCooldown = GameData.msToTicks(type.rangedCooldownMs / 2 + Math.floorMod(seed, 900));
         this.strafeSign = (seed & 1) == 0 ? 1 : -1;
+        this.raiding = (type == GameData.MonsterType.ZOMBIE_BOSS);
+        this.wanderAngle = (Math.floorMod(seed, 360)) * Math.PI / 180.0;
+        this.wanderTimer = 40 + Math.floorMod(seed, 50);
         this.chaseAngle = target == null ? 0 : Math.atan2(target.getY() - y, target.getX() - x);
         if (map != null) {
             pushOutOfWalls();   // safety net if a caller spawns it on a blocked spot
@@ -77,6 +84,14 @@ public final class Monster extends Entity {
 
     public GameData.MonsterType getType() {
         return type;
+    }
+
+    public boolean isRaiding() {
+        return raiding;
+    }
+
+    public void setRaiding(boolean raiding) {
+        this.raiding = raiding;
     }
 
     // ------------------------------------------------------------------ simulation
@@ -112,8 +127,14 @@ public final class Monster extends Entity {
         updateRangedAttack(dist);
     }
 
-    /** Walks towards the player (bandits keep their distance and circle). */
+    /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside the base. */
     private void moveTowardsTarget(double dist) {
+        boolean playerInCamp = map != null && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+        double aggroRange = provoked ? 340.0 : 195.0;
+        if (!raiding && (playerInCamp || dist > aggroRange)) {
+            wanderOuterZone();
+            return;
+        }
         if (--repathTimer <= 0) {
             repathTimer = 6;
             chaseAngle = map == null ? angleTo(target) : map.getChaseAngle(x, getFeetY() - 4, target.getX(), target.getFeetY() - 4, width);
@@ -151,9 +172,37 @@ public final class Monster extends Entity {
         }
     }
 
+    /** Roams outer zones during scavenge phase without entering the player's safe base camp. */
+    private void wanderOuterZone() {
+        if (--wanderTimer <= 0) {
+            wanderTimer = 45 + (int) ((animTimer * 17L + (long) x) % 60);
+            wanderAngle += (((animTimer & 1) == 0) ? 1 : -1) * (0.7 + ((animTimer % 5) * 0.25));
+        }
+        if (map != null) {
+            Rectangle safe = map.getCampArea();
+            safe.grow(28, 28);
+            if (safe.contains((int) x, (int) y)) {
+                wanderAngle = Math.atan2(y - safe.getCenterY(), x - safe.getCenterX());
+            }
+        }
+        double oldX = x, oldY = y;
+        double step = speed * 0.52;
+        moveWithCollision(Math.cos(wanderAngle) * step, Math.sin(wanderAngle) * step);
+        facingLeft = Math.cos(wanderAngle) < 0;
+        if (Math.hypot(x - oldX, y - oldY) < step * 0.25) {
+            wanderAngle += Math.PI * 0.65;
+            wanderTimer = 25;
+        }
+    }
+
     /** Ranged monsters fire when the player is in range and in sight; bandits show a "!" first. */
     private void updateRangedAttack(double dist) {
         if (type.rangedProjectile == null) {
+            return;
+        }
+        boolean playerInCamp = map != null && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+        if (!raiding && playerInCamp) {
+            aimWarning = 0;
             return;
         }
         if (aimWarning > 0) {
@@ -208,6 +257,7 @@ public final class Monster extends Entity {
         if (!alive) {
             return false;
         }
+        provoked = true;
         takeDamage(damage);
         hitFlash = HIT_FLASH_TICKS;
         double resist = type == GameData.MonsterType.ZOMBIE_BOSS ? 0.25 : 1.0;

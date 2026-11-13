@@ -363,9 +363,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
 
-        howToArea = Theme.textBlock("Stay alive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + ". A new wave comes every "
-                + GameData.WAVE_SECONDS + " s and a boss every " + GameData.BOSS_EVERY_WAVES
-                + " waves. Kills, time and difficulty make your score.", 13, Theme.PAPER_TEXT);
+        howToArea = Theme.textBlock("Survive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across alternating Scavenge and "
+                + "Horde Raid phases! Venture outside base to hunt zombies and loot Supply Chests, then return to Base Camp before raids hit.",
+                13, Theme.PAPER_TEXT);
         form.add(new Theme.PixelLabel("GOAL", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 6);
 
@@ -373,8 +373,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         String[][] controls = {
             {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
             {"Grenade", "mouse_right", "g"}, {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"},
-            {"Switch weapon", "mouse_mid", "1to8"}, {"Workshop", "b"},
-            {"Pause", "p", "esc"}, {"Craft in workshop", "enter"}
+            {"Switch weapon", "mouse_mid", "1to8"}, {"Talk to Base NPCs", "b"},
+            {"Pause", "p", "esc"}, {"Craft / Build / Heal", "enter"}
         };
         JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 6));
         for (String[] c : controls) {
@@ -384,10 +384,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 14);
         form.add(keys, 8);
 
-        form.add(new Theme.PixelLabel("LOOT AND CRAFT", 2, Theme.DARK_RED), 14);
-        form.add(Theme.textBlock("Monsters drop parts that fly into your backpack. Press B to open the workshop: "
-                + "craft better guns (Pistol > Revolver > Shotgun > Rifle > Sniper > Rocket) and upgrade damage, "
-                + "fire rate, health, speed, armour and magnet. Bosses drop the blueprints for the last two guns.",
+        form.add(new Theme.PixelLabel("SCAVENGE, BASE NPC & RAIDS", 2, Theme.DARK_RED), 14);
+        form.add(Theme.textBlock("Return inside your Base Camp (green minimap icon) and press B to talk to the Gunsmith, Doctor, "
+                + "and Engineer: craft weapons, upgrade stats, heal wounds, and build Guard Posts, Fortified Walls, a Medical Tent, "
+                + "and a Supply Depot to hold off periodic Horde Raids and Bosses.",
                 13, Theme.PAPER_TEXT), 6);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);

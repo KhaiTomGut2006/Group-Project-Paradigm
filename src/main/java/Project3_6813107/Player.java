@@ -257,13 +257,20 @@ public final class Player extends Entity {
         }
     }
 
-    /** Armour reduces the damage; right after a hit the player is briefly invulnerable. Returns damage taken. */
+    /** Armour (and fortified base walls inside camp) reduces damage; right after a hit the player is briefly invulnerable. Returns damage taken. */
     @Override
     public int takeDamage(int amount) {
         if (!alive || amount <= 0 || invulnerableTick > 0) {
             return 0;
         }
-        int dealt = Math.max(1, (int) Math.round(amount * (1.0 - getArmorFraction())));
+        double reduction = getArmorFraction();
+        if (map != null && map.getCampArea().contains((int) x, (int) y)) {
+            int wallLv = getLevel(GameData.RecipeKind.BASE_WALL);
+            if (wallLv > 0) {
+                reduction = Math.min(0.85, reduction + wallLv * GameData.RecipeKind.BASE_WALL.perLevel);
+            }
+        }
+        int dealt = Math.max(1, (int) Math.round(amount * (1.0 - reduction)));
         hp -= dealt;
         hurtTick = HURT_TICKS;
         invulnerableTick = GameData.msToTicks(GameData.PLAYER_INVULNERABLE_MS);
@@ -278,6 +285,11 @@ public final class Player extends Entity {
     /** Toxic spit: a few damage pulses over time (shown as green bubbles). */
     public void applyPoison(int ticks) {
         poisonTick = Math.max(poisonTick, ticks);
+    }
+
+    /** Removes active poison (Medical Tent or Camp Doctor treatment). */
+    public void curePoison() {
+        poisonTick = 0;
     }
 
     private void die() {
@@ -401,6 +413,9 @@ public final class Player extends Entity {
         if (r == null || isMaxed(r)) {
             return false;
         }
+        if (r.kind == GameData.RecipeKind.HEAL_NOW && hp >= maxHp && !isPoisoned()) {
+            return false;
+        }
         if (r.requiredWeapon != null && !ownedWeapons.contains(r.requiredWeapon)) {
             return false;
         }
@@ -420,6 +435,12 @@ public final class Player extends Entity {
             Integer bp = cost.get(GameData.ItemType.BLUEPRINT);
             if (bp != null && inventory.get(GameData.ItemType.BLUEPRINT) < bp) {
                 return "Need Blueprint";
+            }
+            return hasItems(cost) ? "Ready" : "Missing items";
+        }
+        if (r.kind == GameData.RecipeKind.HEAL_NOW) {
+            if (hp >= maxHp && !isPoisoned()) {
+                return "Full HP";
             }
             return hasItems(cost) ? "Ready" : "Missing items";
         }
@@ -453,6 +474,10 @@ public final class Player extends Entity {
             case MEDKIT:
                 inventory.put(GameData.ItemType.MEDKIT, inventory.get(GameData.ItemType.MEDKIT) + 1);
                 return "Crafted a Medkit" + paid;
+            case HEAL_NOW:
+                heal((int) GameData.RecipeKind.HEAL_NOW.perLevel);
+                curePoison();
+                return "Camp Doctor treated wounds (+65 HP)" + paid;
             case MAX_HP:
                 levels.put(r.kind, levels.get(r.kind) + 1);
                 int extra = (int) GameData.RecipeKind.MAX_HP.perLevel;

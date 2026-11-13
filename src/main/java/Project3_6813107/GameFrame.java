@@ -173,7 +173,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         JPanel middle = Theme.transparentPanel(new GridBagLayout());   // centres the row vertically
         middle.add(backpackRow);
 
-        workshopButton = makeButton("Workshop", Theme.ButtonStyle.RED, "b");
+        workshopButton = makeButton("Base NPC", Theme.ButtonStyle.RED, "b");
         return makePlate(left, middle, centred(workshopButton));
     }
 
@@ -276,8 +276,9 @@ public final class GameFrame extends JFrame implements ActionListener {
         } else {
             next = "NEXT IN " + formatTime(nextWaveIn);
         }
-        waveLabel.setText("WAVE " + wave + " - " + next);
-        waveLabel.setColor(next.startsWith("BOSS") ? Theme.RED : Theme.TEXT_2);
+        String phase = gamePanel.isRaidPhase() ? "RAID!" : "SCAVENGE";
+        waveLabel.setText("WAVE " + wave + ": " + phase + " - " + next);
+        waveLabel.setColor(gamePanel.isRaidPhase() || next.startsWith("BOSS") ? Theme.RED : Theme.TEXT_2);
         waveBar.setValue(gamePanel.getWaveProgressPercent());
         timerLabel.setText(formatTime(left));
         timerLabel.setColor(left <= 30 ? Theme.GOLD : Theme.TEXT);
@@ -396,7 +397,12 @@ public final class GameFrame extends JFrame implements ActionListener {
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
         if (source == workshopButton) {
-            openUpgradeDialog();
+            if (!gamePanel.isPlayerInBase()) {
+                gamePanel.getPlayer().showHint("Return to Base Camp (green icon) to talk to NPCs!");
+                AssetLoader.playSound("click");
+            } else {
+                openUpgradeDialog();
+            }
         } else if (source == pauseButton) {
             if (gamePanel.isPaused()) {
                 gamePanel.resumeGame();

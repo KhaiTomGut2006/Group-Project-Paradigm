@@ -63,7 +63,7 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
     private static final long B_KEY_GRACE_MS = 400;   // see KeyCommand: ignore the B press that opened us
     private static final int ROW_HEIGHT = 28;
     private static final int DETAIL_WIDTH = 290;
-    private static final String GREETING = "Bring me parts and I'll build you something. Pick an upgrade from the list.";
+    private static final String GREETING = "Welcome back to camp! Craft guns, heal wounds, or build base defenses.";
 
     private enum RowState { READY, MISSING, LOCKED, DONE }
 
@@ -115,7 +115,7 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
     /** The trader in the kit's dialog box on the left; the WORKSHOP title and BACK button on the right. */
     private JPanel buildHeader() {
         trader = new Theme.SpeechBox("portrait_other", GREETING);
-        Theme.PixelLabel title = new Theme.PixelLabel("WORKSHOP", 5, Theme.GOLD);
+        Theme.PixelLabel title = new Theme.PixelLabel("BASE CAMP NPCs", 5, Theme.GOLD);
         title.setShadow(true);
         title.setAlignment(javax.swing.SwingConstants.RIGHT);
         Theme.PixelLabel paused = new Theme.PixelLabel("GAME PAUSED", 2, Theme.TEXT_3);
@@ -321,6 +321,9 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         if (status.equals("MAX")) {
             return "already at the maximum level";
         }
+        if (status.equals("Full HP")) {
+            return "your health is already full";
+        }
         if (r.requiredWeapon != null && !player.ownsWeapon(r.requiredWeapon)) {
             return "craft the " + r.requiredWeapon.displayName + " first";
         }
@@ -363,10 +366,47 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         }
         costList.revalidate();
         costList.repaint();
+        craftButton.setText(actionLabelFor(r));
         craftButton.setEnabled(state == RowState.READY);
+        if (newSelection) {
+            trader.setMessage(npcSpeakerLine(r));
+        }
         if (newSelection || feedbackArea.getText().trim().isEmpty()) {
-            showFeedback(state == RowState.READY ? "Ready to craft." : capitalize(explainWhyNot(r)) + ".",
+            showFeedback(state == RowState.READY ? "Ready: " + actionLabelFor(r).toLowerCase() + " now." : capitalize(explainWhyNot(r)) + ".",
                     state == RowState.READY ? Theme.DARK_GREEN : Theme.PAPER_TEXT);
+        }
+    }
+
+    private static String actionLabelFor(GameData.UpgradeRecipe r) {
+        switch (r.kind) {
+            case BASE_TURRET:
+            case BASE_WALL:
+            case BASE_MEDIC:
+            case BASE_FARM:
+                return "BUILD";
+            case HEAL_NOW:
+                return "HEAL NOW";
+            default:
+                return "CRAFT";
+        }
+    }
+
+    private static String npcSpeakerLine(GameData.UpgradeRecipe r) {
+        switch (r.kind) {
+            case WEAPON:
+            case DAMAGE:
+            case FIRE_RATE:
+                return "GUNSMITH: Bring scavenged steel and parts, and I'll upgrade your firepower.";
+            case BASE_TURRET:
+            case BASE_WALL:
+            case BASE_FARM:
+                return "ENGINEER: Let's fortify the camp perimeter before the next Horde Raid hits!";
+            case BASE_MEDIC:
+            case HEAL_NOW:
+            case MEDKIT:
+                return "MEDIC: Hurt from scavenging? I can patch you up or expand the medical tent.";
+            default:
+                return "TRAINER: Spend your loot to boost your survivor's speed, armour, and endurance.";
         }
     }
 
@@ -405,10 +445,20 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
     }
 
     private static String kindName(GameData.UpgradeRecipe r) {
-        if (r.kind == GameData.RecipeKind.WEAPON) {
-            return "WEAPON";
+        switch (r.kind) {
+            case WEAPON:
+                return "WEAPON";
+            case BASE_TURRET:
+            case BASE_WALL:
+            case BASE_MEDIC:
+            case BASE_FARM:
+                return "BASE BUILD";
+            case HEAL_NOW:
+            case MEDKIT:
+                return "MEDICAL";
+            default:
+                return "UPGRADE";
         }
-        return r.kind == GameData.RecipeKind.MEDKIT ? "SUPPLY" : "UPGRADE";
     }
 
     /** "Craft Revolver" -> "Revolver": the list already says what kind it is. */
@@ -420,8 +470,17 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         if (r.kind == GameData.RecipeKind.WEAPON && r.weapon != null) {
             return new ImageIcon(Theme.fit(AssetLoader.getWeaponIcon(r.weapon), 64, 32));
         }
-        if (r.kind == GameData.RecipeKind.MEDKIT) {
+        if (r.kind == GameData.RecipeKind.MEDKIT || r.kind == GameData.RecipeKind.HEAL_NOW || r.kind == GameData.RecipeKind.BASE_MEDIC) {
             return new ImageIcon(Theme.fit(AssetLoader.getItemIcon(GameData.ItemType.MEDKIT), 32, 32));
+        }
+        if (r.kind == GameData.RecipeKind.BASE_FARM) {
+            return new ImageIcon(Theme.fit(AssetLoader.getItemIcon(GameData.ItemType.FOOD), 32, 32));
+        }
+        if (r.kind == GameData.RecipeKind.BASE_TURRET) {
+            return new ImageIcon(Theme.fit(AssetLoader.getItemIcon(GameData.ItemType.STEEL), 32, 32));
+        }
+        if (r.kind == GameData.RecipeKind.BASE_WALL) {
+            return new ImageIcon(Theme.fit(AssetLoader.getItemIcon(GameData.ItemType.WOOD), 32, 32));
         }
         if (r.kind == GameData.RecipeKind.ARMOR) {
             return new ImageIcon(Theme.kit("status_icons/armored", Theme.S));
