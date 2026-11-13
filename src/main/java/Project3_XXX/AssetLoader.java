@@ -13,7 +13,9 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 import javax.imageio.ImageIO;
 import javax.sound.sampled.AudioFormat;
@@ -41,6 +43,7 @@ public final class AssetLoader {
 
     private static final Map<String, BufferedImage> IMAGE_CACHE = new HashMap<>();
     private static final Map<String, BufferedImage[]> FRAMES_CACHE = new HashMap<>();
+    private static final Set<String> MISSING = new HashSet<>();   // images that could not be loaded
 
     // ------------------------------------------------------------------ file lookup
     /** Opens a resource: classpath first, then the source folder, then a folder next to the working dir. */
@@ -75,6 +78,7 @@ public final class AssetLoader {
         } catch (IOException | RuntimeException ex) {
             System.err.println("AssetLoader: cannot load image " + relPath + " (" + ex.getMessage() + ")");
             img = makeFallback(32, 32);
+            MISSING.add(relPath);
         }
         IMAGE_CACHE.put(relPath, img);
         return img;
@@ -92,7 +96,9 @@ public final class AssetLoader {
         int frameW = sheet.getWidth() / count;
         BufferedImage[] frames = new BufferedImage[count];
         for (int i = 0; i < count; i++) {
-            frames[i] = frameW > 0 ? sheet.getSubimage(i * frameW, 0, frameW, sheet.getHeight()) : makeFallback(32, 32);
+            // a missing sheet gives full-size checker frames instead of thin slivers of the fallback
+            boolean usable = frameW > 0 && !MISSING.contains(relPath);
+            frames[i] = usable ? sheet.getSubimage(i * frameW, 0, frameW, sheet.getHeight()) : makeFallback(32, 32);
         }
         FRAMES_CACHE.put(key, frames);
         return frames;
@@ -427,7 +433,7 @@ public final class AssetLoader {
     }
 
     /** True when the named .wav exists and can be decoded (used by tests and the launcher). */
-    public static boolean canLoadSound(String name) {
+    public static synchronized boolean canLoadSound(String name) {
         return loadSound(name) && SOUND_DATA.get(name).length > 0;
     }
 }

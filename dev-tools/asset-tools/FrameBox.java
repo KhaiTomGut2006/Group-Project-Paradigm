@@ -1,0 +1,3 @@
+import java.awt.image.BufferedImage; import java.io.File; import javax.imageio.ImageIO;
+public class FrameBox { public static void main(String[] a) throws Exception { for (int k = 1; k < a.length; k++) { BufferedImage im = ImageIO.read(new File(a[k])); int fw = Integer.parseInt(a[0]); int fh = im.getHeight(); StringBuilder sb = new StringBuilder(new File(a[k]).getName() + ": ");
+ for (int f = 0; f < im.getWidth() / fw; f++) { int minx=999,miny=999,maxx=-1,maxy=-1; for (int y=0;y<fh;y++) for (int x=0;x<fw;x++) if ((im.getRGB(f*fw+x,y)>>>24)>0){minx=Math.min(minx,x);maxx=Math.max(maxx,x);miny=Math.min(miny,y);maxy=Math.max(maxy,y);} sb.append("["+minx+","+miny+"-"+maxx+","+maxy+"] "); } System.out.println(sb); } } }

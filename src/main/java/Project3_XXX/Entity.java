@@ -11,6 +11,8 @@ import java.awt.Composite;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * Superclass of everything that lives in the world: Player, Monster, Bullet and DroppedItem.
@@ -156,6 +158,30 @@ public abstract class Entity implements GameMap.Drawable {
         return free;
     }
 
+    /**
+     * If the feet ended up inside a wall or prop (e.g. spawned on a bad spot), moves the entity to the
+     * nearest free spot, searching outwards in rings of 8 px. Returns false if nothing free was found.
+     */
+    public boolean pushOutOfWalls() {
+        if (!isInsideWall()) {
+            return true;
+        }
+        double startX = x, startY = y;
+        for (int ring = 1; ring <= 12; ring++) {
+            for (int i = 0; i < 16; i++) {
+                double a = i * Math.PI / 8;
+                x = startX + Math.cos(a) * ring * 8;
+                y = startY + Math.sin(a) * ring * 8;
+                if (!isInsideWall()) {
+                    return true;
+                }
+            }
+        }
+        x = startX;
+        y = startY;
+        return false;
+    }
+
     /** True if the feet would be inside a wall or prop at the current position. */
     public boolean isInsideWall() {
         return map != null && map.isBlocked(getFeetBounds());
@@ -204,7 +230,7 @@ public abstract class Entity implements GameMap.Drawable {
     }
 
     // ------------------------------------------------------------------ white silhouettes (cached per frame)
-    private static final java.util.Map<BufferedImage, BufferedImage> WHITE_CACHE = new java.util.HashMap<>();
+    private static final Map<BufferedImage, BufferedImage> WHITE_CACHE = new HashMap<>();
 
     private static BufferedImage whiteSilhouette(BufferedImage frame) {
         synchronized (WHITE_CACHE) {

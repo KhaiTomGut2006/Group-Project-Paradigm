@@ -79,7 +79,6 @@ public final class Bullet extends Entity {
         this.targetX = targetX;
         this.targetY = targetY;
         this.knockback = Math.min(7, 1 + damage / 10);
-        this.facingLeft = vx < 0;
     }
 
     // ------------------------------------------------------------------ factories

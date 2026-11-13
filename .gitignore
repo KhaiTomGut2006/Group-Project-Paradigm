@@ -1,0 +1,9 @@
+# macOS AppleDouble / Finder junk (this volume is exFAT)
+._*
+.DS_Store
+
+# build output
+target/
+
+# runtime score file written by the game
+highscores.txt

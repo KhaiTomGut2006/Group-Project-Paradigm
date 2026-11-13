@@ -328,11 +328,14 @@ public final class GameMap {
     private final List<Rectangle> keepClear = new ArrayList<>();
     private final List<int[]> decals = new ArrayList<>();          // {defIndex, x, y}
     private final List<PropDef> decalDefs = new ArrayList<>();
+    private final List<Rectangle> dashes = new ArrayList<>();             // faded road markings
     private final Rectangle playArea = new Rectangle(T, T, (COLS - 2) * T, (ROWS - 2) * T);
     private Rectangle campArea;          // world pixels
     private Point playerSpawn;
     private final List<Point> spawnPoints = new ArrayList<>();
     private boolean[][] walkable;
+    private boolean[][] openEast;     // can walk from (c, r) to (c + 1, r)
+    private boolean[][] openSouth;    // can walk from (c, r) to (c, r + 1)
 
     // flow field towards the player
     private final int[][] flow = new int[ROWS][COLS];
@@ -514,13 +517,14 @@ public final class GameMap {
 
     // ------------------------------------------------------------------ path finding for monsters
     /**
-     * Direction (radians) a monster at (fromX, fromY) should walk to reach (toX, toY): straight at
-     * the target when nothing is in the way, otherwise downhill on a breadth-first "distance to the
-     * player" grid, which leads around props and walls.
+     * Direction (radians) a walker whose feet are centred on (fromX, fromY) should go to reach
+     * (toX, toY): straight at the target when nothing is in the way, otherwise downhill on a
+     * breadth-first "distance to the target" grid, which leads around props and walls.
+     * feetWidth is the walker's width, so a big boss does not try to squeeze through small gaps.
      */
-    public double getChaseAngle(double fromX, double fromY, double toX, double toY) {
+    public double getChaseAngle(double fromX, double fromY, double toX, double toY, int feetWidth) {
         double direct = Math.atan2(toY - fromY, toX - fromX);
-        if (hasClearPath(fromX, fromY, toX, toY)) {
+        if (hasClearPath(fromX, fromY, toX, toY, feetWidth)) {
             return direct;
         }
         refreshFlow((int) (toX / T), (int) (toY / T));
@@ -528,46 +532,68 @@ public final class GameMap {
         if (col < 0 || row < 0 || col >= COLS || row >= ROWS) {
             return direct;
         }
-        int bestCol = -1, bestRow = -1;
+        // 1st choice: the lowest neighbour we can walk to in a straight line from where we stand
+        int[] step = bestNeighbour(col, row, fromX, fromY, feetWidth, true);
+        if (step == null) {
+            // 2nd choice: the lowest neighbour connected to our tile; sliding along walls gets us there
+            step = bestNeighbour(col, row, fromX, fromY, feetWidth, false);
+        }
+        if (step == null) {
+            return direct;
+        }
+        double tx = step[0] * T + T / 2.0, ty = step[1] * T + T / 2.0;
+        return Math.atan2(ty - fromY, tx - fromX);
+    }
+
+    /** Same as above for a normal-sized (12 px wide) walker. */
+    public double getChaseAngle(double fromX, double fromY, double toX, double toY) {
+        return getChaseAngle(fromX, fromY, toX, toY, 12);
+    }
+
+    /** The neighbouring tile {col, row} with the smallest distance to the target, or null. */
+    private int[] bestNeighbour(int col, int row, double fromX, double fromY, int feetWidth, boolean needLineOfSight) {
+        int[] bestStep = null;
         int best = flow[row][col];
         for (int dr = -1; dr <= 1; dr++) {
             for (int dc = -1; dc <= 1; dc++) {
                 int nc = col + dc, nr = row + dr;
-                if ((dc == 0 && dr == 0) || !isWalkableTile(nc, nr)) {
+                if ((dc == 0 && dr == 0) || !isWalkableTile(nc, nr) || flow[nr][nc] >= best) {
                     continue;
                 }
-                // a diagonal step is only allowed if both side tiles are open (no corner cutting)
-                if (dc != 0 && dr != 0 && (!isWalkableTile(col + dc, row) || !isWalkableTile(col, row + dr))) {
-                    continue;
+                boolean ok;
+                if (needLineOfSight) {
+                    ok = hasClearPath(fromX, fromY, nc * T + T / 2.0, nr * T + T / 2.0, feetWidth);
+                } else {
+                    ok = (dc == 0 || dr == 0) && isLinked(col, row, nc, nr);
                 }
-                if (flow[nr][nc] < best) {
+                if (ok) {
                     best = flow[nr][nc];
-                    bestCol = nc;
-                    bestRow = nr;
+                    bestStep = new int[]{nc, nr};
                 }
             }
         }
-        if (bestCol < 0) {
-            return direct;
-        }
-        double tx = bestCol * T + T / 2.0, ty = bestRow * T + T / 2.0;
-        return Math.atan2(ty - fromY, tx - fromX);
+        return bestStep;
     }
 
-    /** Samples the straight line every 8 px with a small feet-sized box. */
-    public boolean hasClearPath(double x0, double y0, double x1, double y1) {
+    /** Samples the straight line every 8 px with a feet-sized box (feetWidth x 8). */
+    public boolean hasClearPath(double x0, double y0, double x1, double y1, int feetWidth) {
         double dist = Math.hypot(x1 - x0, y1 - y0);
         int steps = (int) (dist / 8);
-        Rectangle probe = new Rectangle(0, 0, 12, 8);
-        for (int i = 1; i < steps; i++) {
+        Rectangle probe = new Rectangle(0, 0, feetWidth, 8);
+        for (int i = 1; i <= steps; i++) {
             double t = i / (double) steps;
-            probe.x = (int) (x0 + (x1 - x0) * t) - 6;
+            probe.x = (int) (x0 + (x1 - x0) * t) - feetWidth / 2;
             probe.y = (int) (y0 + (y1 - y0) * t) - 4;
             if (isBlocked(probe)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /** Line check for a normal-sized walker (also used for line of sight of ranged monsters). */
+    public boolean hasClearPath(double x0, double y0, double x1, double y1) {
+        return hasClearPath(x0, y0, x1, y1, 12);
     }
 
     /** Rebuilds the distance grid when the target moved to another tile. */
@@ -595,7 +621,7 @@ public final class GameMap {
             int[] cur = queue.poll();
             for (int[] s : steps) {
                 int nc = cur[0] + s[0], nr = cur[1] + s[1];
-                if (isWalkableTile(nc, nr) && dist[nr][nc] == FAR) {
+                if (isLinked(cur[0], cur[1], nc, nr) && dist[nr][nc] == FAR) {
                     dist[nr][nc] = dist[cur[1]][cur[0]] + 1;
                     queue.add(new int[]{nc, nr});
                 }
@@ -743,19 +769,20 @@ public final class GameMap {
 
     // ------------------------------------------------------------------ the camp (same idea on every map)
     /**
-     * The safe-looking camp in the middle: tents along the back, a workbench with the trader,
-     * a guard, the burning barrel and the flag. Its centre stays empty so the fight has room.
+     * The camp in the middle: shelter, workbench with the trader and the radio along the back,
+     * low barricades on the south corners, the burning barrel and the flag. Its middle stays empty
+     * and it is open to the west, east and south so the horde can come in from three sides.
      */
     private void buildCamp() {
-        int c0 = campArea.x / T, r0 = campArea.y / T;
+        int c0 = campArea.x / T, r0 = campArea.y / T;     // camp = 12 x 10 tiles
         boolean indoor = type == GameData.MapType.ABANDONED_BUNKER;
         if (!indoor) {
             paint(DIRT, c0, r0, 12, 10);
         }
-        // back row (north side): shelter + workbench + trader, crates
+        // back row
         if (indoor) {
-            putLeft(BED_FRAME_H, c0 + 1, r0 + 1);
-            putLeft(LOCKER_DOUBLE, c0 + 3, r0 + 1);
+            putLeft(BED_FRAME_H, c0, r0 + 2);
+            putLeft(LOCKER_DOUBLE, c0 + 2, r0 + 2);
         } else {
             putLeft(TENT_A, c0, r0 + 2);
         }
@@ -765,403 +792,576 @@ public final class GameMap {
         putTile(DESK_RADIO, c0 + 7, r0 + 2);
         putLeft(indoor ? SHELF_STOCKED : TENT_GREEN, c0 + 8, r0 + 2);
         putLeft(indoor ? RACK_STOCKED : BOX_SUPPLY, c0 + 10, r0 + 2);
-        // the fire and the flag are the camp's landmarks
+        // south corners: low barricades of crates and barrels
+        putLeft(CRATE_WOOD, c0, r0 + 9);
+        putLeft(BARREL_ORANGE, c0 + 1, r0 + 9);
+        putLeft(BOX_PILE, c0, r0 + 8);
+        putLeft(CRATE_METAL, c0 + 11, r0 + 9);
+        putLeft(BARREL_RED, c0 + 10, r0 + 9);
+        putLeft(BOX_AMMO, c0 + 11, r0 + 8);
+        // landmarks: the fire, the flag, a guard
         put(FLAME_BARREL, playerSpawn.x - 2.5 * T, playerSpawn.y - 0.5 * T);
-        put(FLAG, playerSpawn.x + 3 * T, playerSpawn.y - 2.2 * T);
-        putTile(NPC_GUARD, c0 + 2, r0 + 5);
-        put(indoor ? WATER_COOLER : BOX_WATER, campArea.x + campArea.width - 1.2 * T, playerSpawn.y + 2.5 * T);
+        put(FLAG, campArea.x + campArea.width - 1.5 * T, r0 * T + 5.6 * T);
+        putTile(NPC_GUARD, c0 + 1, r0 + 5);
+        put(indoor ? WATER_COOLER : BOX_WATER, campArea.x + campArea.width - 1.5 * T, playerSpawn.y + 1.4 * T);
+        decal(SACK, campArea.x + 5 * T, playerSpawn.y + 2 * T);
+    }
+
+    // ------------------------------------------------------------------ small reusable arrangements
+    /** Three barrels in a tight triangle. */
+    private void barrels(int col, int row, PropDef a, PropDef b, PropDef c) {
+        double x = col * T, bottom = (row + 1) * T;
+        put(a, x + 12, bottom - 12);
+        put(b, x + 36, bottom - 12);
+        put(c, x + 24, bottom + 2);
+    }
+
+    /** A pile of tyres. */
+    private void tyres(int col, int row) {
+        double x = col * T, bottom = (row + 1) * T;
+        put(TIRES, x + 14, bottom - 10);
+        put(TIRES_LOW, x + 44, bottom - 10);
+        put(rng.nextBoolean() ? TIRES_G : TIRES_LOW_G, x + 30, bottom + 6);
+    }
+
+    /** A row of the same prop, `count` times, `gap` pixels apart (left edges), standing on tile row `row`. */
+    private void rowOf(PropDef d, int col, int row, int count, int gap) {
+        for (int i = 0; i < count; i++) {
+            put(d, col * T + d.w / 2.0 + i * gap, (row + 1) * T);
+        }
+    }
+
+    /** Faded paint dashes along a road (horizontal when vertical == false). */
+    private void roadLine(int from, int to, int at, boolean vertical) {
+        for (int i = from; i <= to; i++) {
+            if (vertical) {
+                dashes.add(new Rectangle(at - 1, i * T + 8, 2, 14));
+            } else {
+                dashes.add(new Rectangle(i * T + 8, at - 1, 14, 2));
+            }
+        }
+    }
+
+    /** A concrete building: wall cells whose lowest row shows its front face. */
+    private void building(int col, int row, int w, int h) {
+        wallRect(col, row, w, h);
     }
 
     // ------------------------------------------------------------------ map 1: highway
     private void buildHighway() {
-        // an east-west highway across the north, a side road running south through the camp
-        paint(DIRT, 1, 5, COLS - 2, 5);
-        paint(DIRT, 25, 10, 6, ROWS - 11);
-        reserve(1, 6, COLS - 2, 3);          // the middle lanes of the highway stay drivable
-        reserve(26, 10, 4, ROWS - 11);       // the side road is the main horde lane
-        reserve(1, 22, COLS - 2, 3);         // southern east-west lane
+        paint(DIRT, 0, 4, COLS, 6);                 // the highway, running into the border on both sides
+        paint(DIRT, 25, 10, 6, ROWS - 10);          // side road south through the camp
+        roadLine(0, COLS - 1, 7 * T, false);
+        roadLine(10, 12, 28 * T, true);
+        roadLine(23, ROWS - 1, 28 * T, true);
+        reserve(1, 6, 6, 2);                        // the inner lanes stay open except at the pile-up
+        reserve(18, 6, COLS - 19, 2);
+        reserve(26, 10, 4, ROWS - 11);
+        reserve(1, 26, COLS - 2, 2);
 
-        // wrecks on the highway: a pile-up in the west, a blockade in the east, single wrecks between
-        putLeft(CAR_RED_H, 4, 5);
-        putLeft(VAN_BURNT_H, 9, 5);
-        putLeft(CAR_BURNT_V, 14, 5);
-        put(CAR_BLUE_V, 16 * T, 10 * T);
-        putLeft(CAR_BURNT_H, 17, 9);
-        putLeft(TIRES_LOW, 20, 9);
-        putLeft(VAN_BLUE_H, 36, 5);
-        putLeft(CAR_RED_H, 41, 9);
-        putLeft(CAR_BURNT_H, 47, 5);
-        put(VAN_BURNT_V, 52 * T, 10 * T);
-        putLeft(BARREL_ORANGE, 45, 9);
+        // north roadside
+        putLeft(SIGN_EXIT, 4, 2);
+        tyres(10, 2);
+        putLeft(FENCE_BROKEN_A, 16, 2);
+        putLeft(FENCE_BROKEN_B, 18, 2);
+        putLeft(FENCE_BROKEN_A, 20, 2);
+        putLeft(SIGN_DANGER, 31, 2);
+        putLeft(CRATE_STACK_G, 38, 2);
+        putLeft(CRATE_WOOD_G, 40, 2);
+        barrels(43, 2, BARREL_RED_G, BARREL_ORANGE, BARREL_RED);
+        putLeft(STOP_SIGN, 48, 3);
+        tyres(51, 2);
+
+        // pile-up in the west lanes
+        putLeft(CAR_RED_H, 2, 5);
+        putLeft(VAN_BURNT_H, 7, 6);
+        putLeft(CAR_BURNT_V, 11, 8);
+        putLeft(CAR_RED_H, 12, 5);
+        putLeft(CAR_BLUE_V, 14, 9);
+        putLeft(TIRES_LOW, 9, 8);
+        putLeft(TIRES_LOW, 16, 7);
+        decal(PLANKS, 6 * T, 8 * T + 6);
+        decal(PLANKS, 17 * T, 5 * T);
+        // single wrecks on the shoulders
+        putLeft(CAR_BURNT_H, 20, 4);
+        putLeft(VAN_BLUE_H, 33, 4);
+        putLeft(CAR_RED_H, 37, 9);
+        putLeft(CAR_BURNT_H, 23, 9);
+        // road block in the east with a gap in the middle lanes
+        barrels(45, 4, BARREL_ORANGE, BARREL_RED, BARREL_ORANGE);
+        putLeft(CRATE_STACK, 44, 9);
         putLeft(BARREL_RED, 46, 9);
-        decal(PLANKS, 30 * T, 7 * T + 10);
-        decal(PLANKS, 11 * T, 8 * T);
+        putLeft(CAR_BURNT_V, 50, 9);
+        putLeft(VAN_BURNT_H, 51, 4);
+        decal(PLANKS, 47 * T, 7 * T + 12);
 
-        // roadside north of the highway
-        putLeft(SIGN_EXIT, 6, 3);
-        putLeft(TIRES_G, 12, 3);
-        putLeft(TIRES_LOW_G, 13, 3);
-        putLeft(FENCE_BROKEN_A, 20, 3);
-        putLeft(FENCE_BROKEN_B, 22, 3);
-        putLeft(SIGN_DANGER, 33, 3);
-        putLeft(CRATE_STACK_G, 42, 3);
-        putTile(BARREL_RED_G, 44, 3);
-        putLeft(STOP_SIGN, 24, 4);
-        putLeft(TIRES, 50, 3);
+        // where the side road meets the highway
+        putLeft(STOP_SIGN, 24, 11);
+        putLeft(SIGN_EXIT, 31, 11);
+        barrels(20, 10, BARREL_ORANGE_G, BARREL_RED, BARREL_ORANGE);
 
-        // south of the highway: roadside junk along the shoulder
-        putLeft(STOP_SIGN, 31, 11);
-        putLeft(SIGN_EXIT, 33, 12);
-        putTile(BARREL_ORANGE_G, 22, 12);
-        putTile(BARREL_RED, 23, 12);
+        // scrapyard (south-west): a broken fence with an opening, wrecks parked in rows
+        rowOf(FENCE_BROKEN_A, 2, 13, 2, 64);
+        rowOf(FENCE_BROKEN_B, 10, 13, 2, 64);
+        putLeft(CAR_BURNT_V, 3, 17);
+        putLeft(CAR_RED_V, 4, 17);
+        putLeft(CAR_BURNT_V, 5, 17);
+        putLeft(VAN_BURNT_H, 8, 16);
+        putLeft(CAR_BURNT_H, 12, 16);
+        putLeft(METAL_STACK_G, 16, 16);
+        putLeft(CAR_BLUE_V, 3, 23);
+        putLeft(VAN_BURNT_V, 4, 23);
+        tyres(7, 21);
+        tyres(7, 23);
+        putLeft(METAL_STACK, 11, 22);
+        putLeft(CRATE_METAL, 14, 22);
+        putLeft(CRATE_METAL_G, 15, 23);
+        putLeft(CAR_RED_H, 17, 22);
 
-        // scrapyard in the south-west: stacked wrecks and tyre piles around a yard
-        putLeft(CAR_BURNT_V, 3, 15);
-        putLeft(CAR_RED_V, 4, 15);
-        putLeft(VAN_BURNT_H, 6, 13);
-        putLeft(TIRES, 9, 14);
-        putLeft(TIRES_LOW, 10, 14);
-        putLeft(METAL_STACK, 12, 14);
-        putLeft(CAR_BLUE_V, 3, 20);
-        putLeft(TIRES_G, 5, 19);
-        putLeft(CRATE_METAL, 12, 18);
-        putLeft(CRATE_METAL_G, 13, 18);
-        putLeft(FENCE_BROKEN_A, 7, 20);
-        putLeft(CAR_BURNT_H, 15, 20);
-        scatter(new PropDef[]{TIRES_LOW_G, BARREL_RED_G, CRATE_WOOD_G}, 3, 26, 18, 7, 7, 80);
+        // ranch (south-east): a fenced yard with a water tower, troughs and a feed store
+        rowOf(FENCE_BROKEN_A, 36, 13, 2, 64);
+        rowOf(FENCE_BROKEN_B, 44, 13, 2, 64);
+        rowOf(FENCE_BROKEN_A, 36, 23, 2, 64);
+        rowOf(FENCE_BROKEN_B, 44, 23, 2, 64);
+        putLeft(WATER_TOWER, 39, 18);
+        barrels(41, 17, BARREL_ORANGE, BARREL_RED, BARREL_ORANGE_G);
+        putLeft(PALLET, 45, 16);
+        putLeft(CRATE_WOOD, 46, 16);
+        putLeft(PLANTER_LONG, 44, 20);
+        putLeft(PLANTER_LONG, 47, 20);
+        putLeft(TIRES_G, 50, 18);
+        putLeft(BUCKET_WOOD, 49, 21);
 
-        // ranch in the south-east: a broken fence square with barrels and a water tank inside
-        putLeft(FENCE_BROKEN_A, 36, 13);
-        putLeft(FENCE_BROKEN_B, 39, 13);
-        putLeft(FENCE_BROKEN_A, 45, 13);
-        putLeft(FENCE_BROKEN_B, 48, 13);
-        putLeft(FENCE_BROKEN_A, 36, 20);
-        putLeft(FENCE_BROKEN_B, 45, 20);
-        putLeft(FENCE_BROKEN_A, 48, 20);
-        putLeft(WATER_TOWER, 41, 16);
-        putLeft(BARREL_ORANGE, 43, 16);
-        putLeft(BARREL_RED, 44, 16);
-        putLeft(CRATE_WOOD, 47, 17);
-        putLeft(PALLET, 38, 17);
-        scatter(new PropDef[]{CAR_BURNT_H, VAN_BURNT_H, CAR_RED_H}, 34, 26, 18, 7, 3, 60);
-        scatter(new PropDef[]{TIRES_G, BARREL_ORANGE_G, CRATE_METAL_G, TIRES_LOW_G}, 34, 26, 18, 7, 6, 80);
-        sandPatches(10);
+        // south-west: a burnt-out roadside motel (a broken wall with gaps) and its car park
+        building(3, 29, 5, 2);
+        building(10, 29, 4, 2);
+        building(16, 29, 4, 2);
+        putLeft(CAR_BURNT_H, 4, 33);
+        putLeft(CAR_RED_H, 10, 33);
+        putLeft(VAN_BURNT_H, 16, 33);
+        putLeft(BARREL_RED_G, 8, 31);
+        putLeft(CRATE_WOOD_G, 14, 31);
+        putLeft(SIGN_DANGER, 4, 27);
+        tyres(19, 25);
+
+        // south-east: a trailer park of wrecked vans around a dry patch
+        putLeft(VAN_BURNT_V, 36, 31);
+        putLeft(VAN_BLUE_H, 39, 33);
+        putLeft(VAN_BURNT_H, 45, 33);
+        putLeft(CAR_BURNT_V, 52, 32);
+        putLeft(CAR_RED_V, 51, 29);
+        barrels(42, 29, BARREL_RED, BARREL_ORANGE_G, BARREL_RED_G);
+        putLeft(WATER_TANK_H, 47, 28);
+        putLeft(PALLET, 38, 28);
+        putLeft(SIGN_EXIT, 33, 28);
+
+        // along the side road
+        putLeft(STOP_SIGN, 31, 24);
+        putLeft(BARREL_ORANGE_G, 23, 31);
+        putLeft(TIRES_LOW_G, 31, 33);
     }
 
     // ------------------------------------------------------------------ map 2: survivor camp
     private void buildSurvivorCamp() {
-        // a main street and three cross streets of trodden dirt
-        paint(DIRT, 1, 17, COLS - 2, 3);
-        paint(DIRT, 8, 2, 3, ROWS - 4);
-        paint(DIRT, 45, 2, 3, ROWS - 4);
-        paint(DIRT, 26, 2, 4, ROWS - 4);
+        // a main street, three cross streets, the market square and the farm
+        paint(DIRT, 0, 17, COLS, 3);
+        paint(DIRT, 8, 0, 3, ROWS);
+        paint(DIRT, 26, 0, 4, ROWS);
+        paint(DIRT, 45, 0, 3, ROWS);
+        paint(DIRT, 12, 22, 11, 11);
         reserve(1, 17, COLS - 2, 3);
-        reserve(8, 2, 3, ROWS - 4);
-        reserve(45, 2, 3, ROWS - 4);
-        reserve(26, 2, 4, ROWS - 4);
+        reserve(8, 1, 3, ROWS - 2);
+        reserve(26, 1, 4, ROWS - 2);
+        reserve(45, 1, 3, ROWS - 2);
 
-        // tent rows facing the streets
-        int[] northRows = {5, 10, 15};
-        for (int r : northRows) {
-            putLeft(TENT_A, 1, r);
-            putLeft(TENT_FLAT, 12, r);
-            putLeft(TENT_A, 16, r);
-            putLeft(TENT_FLAT, 34, r);
-            putLeft(TENT_A, 38, r);
-            putLeft(TENT_GREEN, 49, r);
-            putLeft(TENT_GREEN_FLAT, 51, r);
+        // tent rows: every block has two rows of tents facing each other with a yard between
+        int[][] blocks = {{1, 7}, {11, 25}, {30, 44}, {48, 54}};
+        for (int b = 0; b < blocks.length; b++) {
+            int from = blocks[b][0], to = blocks[b][1];
+            boolean army = b == 3;
+            for (int row : new int[]{5, 15}) {
+                int c = from;
+                int i = 0;
+                while (c + 2 <= to) {
+                    PropDef tent = army ? (i % 2 == 0 ? TENT_GREEN : TENT_GREEN_FLAT)
+                            : (i % 2 == 0 ? TENT_A : TENT_FLAT);
+                    if (!touchesCamp(tent, c, row)) {
+                        putLeft(tent, c, row);
+                    }
+                    c += tent == TENT_GREEN ? 2 : 3;
+                    i++;
+                }
+            }
+            // yard between the rows: cots, a fire pit corner and supplies
+            for (int c = from + 1; c + 1 <= to; c += 4) {
+                putTile(army ? AMMO_CRATE_H : (c % 8 == from % 8 ? BARREL_WOOD : BOX), c, 9);
+                putTile(c % 3 == 0 ? COT_H : COT_V, c + 2, 11);
+            }
         }
-        // small things between the tents
-        putTile(BARREL_WOOD, 4, 5);
-        putTile(BOX, 5, 10);
-        putTile(BUCKET_WOOD, 6, 15);
-        putTile(BOX_OPEN, 21, 5);
-        putTile(BARREL_BLUE, 22, 10);
-        putTile(CRATE_CLOSED, 21, 15);
-        putTile(BUCKET_TOOLS, 42, 5);
-        putTile(BARREL_GREY, 43, 10);
-        putTile(BOX_WATER, 42, 15);
+        putLeft(LOGS_TIED, 1, 10);
+        putLeft(LOGS_PAIR, 3, 10);
+        putLeft(WATER_TANK_V, 23, 10);
+        putLeft(BUCKET_TOOLS, 20, 12);
+        putLeft(WATER_TANK_H, 41, 10);
+        putLeft(BUCKET_PIPES, 31, 12);
 
-        // south: market square west, farm plots east, stores near the palisade
-        putLeft(STALL_A, 12, 22);
-        putLeft(STALL_B, 15, 22);
-        putLeft(SHED, 18, 22);
-        putLeft(STALL_FOOD, 12, 26);
-        putLeft(STALL_TRADE, 15, 26);
-        putLeft(TABLE_FOOD, 19, 26);
-        putTile(BARREL_WOOD, 22, 26);
-        putLeft(TABLE_TRADE, 12, 30);
-        putLeft(BOX_PILE, 16, 30);
-        putLeft(PALLET, 19, 30);
-        putTile(BUCKET_PIPES, 21, 30);
+        // market square (south-west): stalls round the square
+        putLeft(STALL_A, 12, 24);
+        putLeft(STALL_B, 14, 24);
+        putLeft(SHED, 16, 24);
+        putLeft(STALL_A, 18, 24);
+        putLeft(STALL_B, 20, 24);
+        putLeft(STALL_FOOD, 13, 28);
+        putLeft(STALL_TRADE, 17, 28);
+        putLeft(TABLE_FOOD, 13, 32);
+        putLeft(TABLE_TRADE, 17, 32);
+        putTile(BARREL_WOOD, 21, 28);
+        putTile(BARREL_BLUE, 22, 28);
+        putTile(BOX_SUPPLY, 21, 32);
+        putTile(BOX_OPEN, 12, 30);
+        decal(PAPERS, 16 * T, 30 * T + 4);
+        decal(PAPERS_B, 20 * T, 26 * T + 12);
 
-        for (int r = 22; r <= 30; r += 4) {
+        // storage yard (far south-west)
+        putLeft(CRATE_CLUSTER, 1, 23);
+        putLeft(BARREL_STACK, 4, 23);
+        putLeft(PALLET, 6, 23);
+        putLeft(PIPE_STACK, 1, 27);
+        putLeft(WATER_TANK_V, 3, 27);
+        putLeft(BOX_PILE, 5, 27);
+        putLeft(CRATE_CLOSED, 1, 32);
+        putLeft(CRATE_EMPTY, 2, 32);
+        putLeft(BARREL_STACK, 4, 32);
+        putLeft(WATER_TANK_H, 6, 33);
+
+        // farm (south-east of the centre): a plank fence with a gate and rows of planters
+        rowOf(WOOD_FENCE, 31, 21, 1, 0);
+        rowOf(WOOD_FENCE, 39, 21, 1, 0);
+        for (int r = 24; r <= 32; r += 4) {
             putLeft(PLANTER_LONG, 32, r);
-            putLeft(PLANTER_LONG, 36, r);
-            putTile(CROP_CORN, 40, r);
-            putTile(CROP_WHEAT, 41, r);
-            putTile(CROP_BEET, 42, r);
+            putLeft(PLANTER_LONG, 35, r);
+            putTile(CROP_CORN, 38, r);
+            putTile(CROP_WHEAT, 39, r);
+            putTile(CROP_BEET, 40, r);
+            putTile(CROP_ONION, 41, r);
         }
-        putLeft(WATER_TOWER, 43, 25);
-        putLeft(PLANTER_TALL, 39, 33);
-        putTile(PLANTER, 33, 33);
-        putTile(PLANTER, 35, 33);
+        putLeft(WATER_TOWER, 43, 26);
+        putTile(PLANTER, 43, 23);
+        putTile(PLANTER, 43, 30);
+        putLeft(PLANTER_TALL, 43, 33);
 
-        putLeft(LOGS_TIED, 1, 23);
-        putLeft(LOGS_PAIR, 3, 23);
-        putLeft(PIPE_STACK, 5, 23);
-        putLeft(CRATE_CLUSTER, 1, 28);
-        putLeft(BARREL_STACK, 4, 28);
-        putLeft(WATER_TANK_V, 6, 32);
-        putLeft(WATER_TANK_H, 1, 33);
-        putLeft(STALL_A, 49, 23);
-        putLeft(BOX_SUPPLY, 52, 23);
-        putLeft(TOOLBOXES, 49, 28);
-        putLeft(CRATE_EMPTY, 52, 28);
-        putLeft(SIDE_TABLE, 53, 28);
-        putLeft(BARREL_STACK, 49, 32);
-        decal(PAPERS, 24 * T, 20 * T + 6);
-        decal(SACK, 31 * T, 21 * T);
-        decal(PAPERS_B, 13 * T, 20 * T + 12);
+        // workshop (far south-east)
+        putLeft(SHED, 49, 24);
+        putLeft(TOOLBOXES, 51, 23);
+        putLeft(SIDE_TABLE, 53, 25);
+        putLeft(BUCKET_TOOLS, 49, 28);
+        putLeft(PIPE_STACK, 51, 29);
+        putLeft(CRATE_CLOSED, 53, 29);
+        putLeft(BARREL_STACK, 49, 33);
+        putLeft(GAS_TANK, 52, 33);
+    }
+
+    /** True if a tent's picture placed with putLeft would touch the camp (keeps a half-tile gap). */
+    private boolean touchesCamp(PropDef d, int col, int row) {
+        Rectangle art = new Rectangle(col * T, (row + 1) * T - d.h, d.w, d.h);
+        Rectangle camp = new Rectangle(campArea);
+        camp.grow(T / 2, 0);
+        return art.intersects(camp);
     }
 
     // ------------------------------------------------------------------ map 3: bunker
     private void buildBunker() {
         paint(FLOOR, 0, 0, COLS, ROWS);
-        // outer walls: thick north wall (shows its face), one-cell walls elsewhere
-        wallRect(0, 0, COLS, 2);
+        wallRect(0, 0, COLS, 2);                      // the north wall shows its face
         wallRect(0, 0, 1, ROWS);
         wallRect(COLS - 1, 0, 1, ROWS);
         wallRect(0, ROWS - 1, COLS, 1);
 
-        // inner walls with wide doorways: four rooms around a central hall
-        wallRect(1, 11, 7, 2);       // dorm south wall, door at cols 8-12
+        // four rooms in the corners, each with a wide doorway into the central hall
+        wallRect(1, 11, 7, 2);
         wallRect(13, 11, 6, 2);
-        wallRect(18, 2, 1, 9);       // dorm east wall
-        wallRect(37, 11, 6, 2);      // lab south wall, door at cols 43-47
+        wallRect(18, 2, 1, 9);
+        wallRect(37, 11, 6, 2);
         wallRect(48, 11, 7, 2);
-        wallRect(37, 2, 1, 9);       // lab west wall
-        wallRect(1, 24, 7, 2);       // storage north wall
+        wallRect(37, 2, 1, 9);
+        wallRect(1, 24, 7, 2);
         wallRect(13, 24, 6, 2);
-        wallRect(18, 26, 1, 9);      // storage east wall
-        wallRect(37, 24, 6, 2);      // canteen north wall
+        wallRect(18, 26, 1, 9);
+        wallRect(37, 24, 6, 2);
         wallRect(48, 24, 7, 2);
-        wallRect(37, 26, 1, 9);      // canteen west wall
+        wallRect(37, 26, 1, 9);
         reserve(8, 9, 5, 6);
         reserve(43, 9, 5, 6);
         reserve(8, 22, 5, 6);
         reserve(43, 22, 5, 6);
-        reserve(1, 15, COLS - 2, 6);         // the main corridor across the hall
-        reserve(19, 2, 4, ROWS - 3);         // corridors north-south next to the rooms
-        reserve(33, 2, 4, ROWS - 3);
+        reserve(1, 15, COLS - 2, 6);
+        reserve(19, 2, 3, ROWS - 3);
+        reserve(34, 2, 3, ROWS - 3);
 
-        // dorm (north-west): rows of beds
+        // dorm (north-west): lockers on the wall, two rows of bunks with drawers between
+        rowOf(LOCKER, 1, 3, 5, 18);
+        putLeft(LOCKER_PAIR, 15, 3);
         for (int c = 2; c <= 14; c += 3) {
-            putLeft(c % 2 == 0 ? BED_V : BED_FRAME_V, c, 4);
-            putLeft(c % 2 == 0 ? BED_FRAME_V : BED_V, c, 9);
+            putLeft(c % 2 == 0 ? BED_V : BED_FRAME_V, c, 6);
+            putLeft(c % 2 == 0 ? BED_FRAME_V : BED_V, c, 10);
         }
-        putLeft(LOCKER_PAIR, 16, 3);
-        putLeft(DRAWERS, 15, 6);
+        putLeft(DRAWERS, 7, 3);
+        putLeft(DRAWERS_B, 10, 3);
+        putLeft(CABINET, 16, 7);
+        decal(PAPERS, 9 * T, 8 * T + 6);
 
-        // lab (north-east): ward beds, operating tables, desks
-        putLeft(GURNEY_CURTAIN, 39, 4);
-        putLeft(GURNEY_CURTAIN, 43, 4);
-        putLeft(GURNEY_CURTAIN, 47, 4);
-        putLeft(OP_TABLE, 40, 8);
-        putLeft(OP_TABLE_B, 45, 9);
-        putLeft(DESK_LAB_V, 52, 5);
-        putLeft(DESK_PC_V, 53, 9);
-        putLeft(WATER_COOLER, 50, 3);
-        putLeft(CABINET, 51, 3);
+        // lab (north-east): ward beds on the wall, operating tables, computer desks
+        putLeft(GURNEY_CURTAIN, 38, 4);
+        putLeft(GURNEY_CURTAIN, 40, 4);
+        putLeft(GURNEY_CURTAIN, 42, 4);
+        putLeft(GURNEY_CURTAIN, 44, 4);
+        putLeft(WATER_COOLER, 47, 3);
+        putLeft(CABINET, 48, 3);
+        putLeft(FRIDGE_DOUBLE, 50, 3);
+        putLeft(LOCKER_TALL, 52, 3);
+        putLeft(OP_TABLE, 39, 8);
+        putLeft(OP_TABLE_B, 43, 9);
+        putLeft(DESK_LAB_V, 49, 8);
+        putLeft(DESK_PC_V, 51, 8);
+        putLeft(DESK_LAB_V, 53, 8);
 
-        // storage (south-west): shelves and lockers in aisles
-        for (int c = 2; c <= 14; c += 4) {
-            putLeft(c % 8 == 2 ? SHELF_STOCKED : SHELF_WIDE, c, 29);
-            putLeft(c % 8 == 2 ? FRIDGE_DOUBLE : LOCKER_TALL, c + 1, 33);
+        // offices (north centre): two rows of desks facing each other
+        for (int c = 23; c <= 31; c += 3) {
+            putLeft(DESK_PC_H, c, 5);
+            putLeft(DESK_H, c, 8);
         }
-        putLeft(RACK_STOCKED, 15, 29);
-        putLeft(LOCKER_BROKEN, 16, 33);
-        putLeft(CUPBOARD, 2, 33);
+        rowOf(CABINET, 22, 3, 1, 0);
+        putLeft(DESK_V, 22, 9);
+        putLeft(DESK_V2, 32, 9);
+        putLeft(SHELF_WIDE, 31, 3);
+        putLeft(WATER_COOLER, 29, 3);
 
-        // canteen (south-east): vending machines on the wall, tables in the room
-        putLeft(VENDING_RED, 39, 28);
-        putLeft(VENDING_BLACK, 40, 28);
-        putLeft(VENDING_COFFEE, 41, 28);
-        putLeft(FRIDGE, 43, 28);
-        putLeft(FRIDGE_OPEN, 44, 28);
-        putLeft(DESK_H, 40, 32);
-        putLeft(DESK_PC_H, 45, 32);
-        putLeft(DESK_H, 50, 32);
-        putLeft(DESK_H, 50, 28);
-        putLeft(LOCKER, 53, 28);
+        // storage (south-west): three aisles of shelves
+        for (int c = 2; c <= 14; c += 3) {
+            putLeft(c % 2 == 0 ? SHELF_STOCKED : SHELF_WIDE, c, 28);
+            putLeft(c % 2 == 0 ? RACK_STOCKED : RACK, c, 31);
+        }
+        rowOf(FRIDGE, 2, 34, 3, 32);
+        putLeft(LOCKER_TALL, 7, 34);
+        putLeft(CUPBOARD, 10, 34);
+        putLeft(LOCKER_BROKEN, 13, 34);
+        putLeft(LOCKER_DOUBLE, 15, 34);
 
-        // the hall: office desks and lockers along the corridors, not in them
-        putLeft(DESK_V, 23, 4);
-        putLeft(DESK_PC_V, 25, 4);
-        putLeft(DESK_V2, 30, 4);
-        putLeft(DESK_PC_V, 32, 4);
-        putLeft(LOCKER_DOUBLE, 24, 9);
-        putLeft(CABINET, 30, 9);
-        putLeft(DRAWERS_B, 23, 29);
-        putLeft(RACK, 25, 32);
-        putLeft(LOCKER_TALL, 30, 30);
-        putLeft(SHELF_EMPTY, 32, 33);
+        // canteen (south-east): machines against the north wall, tables in a grid
+        putLeft(VENDING_RED, 38, 26);
+        putLeft(VENDING_BLACK, 39, 26);
+        putLeft(VENDING_COFFEE, 40, 26);
+        putLeft(FRIDGE, 49, 26);
+        putLeft(FRIDGE_OPEN, 50, 26);
+        putLeft(WATER_COOLER, 52, 26);
+        putLeft(SHELF_EMPTY, 53, 26);
+        for (int c = 39; c <= 51; c += 4) {
+            putLeft(DESK_H, c, 30);
+            putLeft(DESK_H, c, 33);
+        }
+
+        // south centre: the records room
+        for (int c = 22; c <= 31; c += 3) {
+            putLeft(c % 2 == 0 ? LOCKER_DOUBLE : CABINET, c, 26);
+        }
+        putLeft(RACK, 23, 30);
+        putLeft(RACK_STOCKED, 26, 30);
+        putLeft(DRAWERS_B, 29, 30);
         putLeft(BED_H2, 23, 33);
-        putLeft(BED_FRAME_H2, 28, 27);
+        putLeft(BED_H, 26, 33);
+        putLeft(BED_FRAME_H2, 29, 33);
+
+        // corridor clutter along the outer walls
+        putLeft(LOCKER_DOUBLE, 1, 15);
+        putLeft(CUPBOARD, 1, 21);
+        putLeft(LOCKER_TALL, 53, 15);
+        putLeft(SHELF_EMPTY, 53, 21);
+        decal(PAPERS_B, 14 * T, 18 * T);
+        decal(PAPERS, 41 * T, 19 * T);
     }
 
     // ------------------------------------------------------------------ map 4: gas station
     private void buildGasStation() {
-        paint(DIRT, 12, 2, 32, 10);          // the forecourt
-        paint(DIRT, 1, 27, COLS - 2, 5);     // the road along the south
-        paint(DIRT, 15, 12, 5, 15);          // two driveways from road to forecourt
-        paint(DIRT, 36, 12, 5, 15);
+        paint(DIRT, 11, 4, 34, 9);              // forecourt
+        paint(DIRT, 0, 27, COLS, 5);            // the road
+        paint(DIRT, 15, 13, 5, 14);             // two driveways
+        paint(DIRT, 36, 13, 5, 14);
+        roadLine(0, COLS - 1, 29 * T + 16, false);
+        building(12, 1, 13, 3);                 // shop
+        building(31, 1, 13, 3);                 // workshop / garage
         reserve(1, 28, COLS - 2, 3);
         reserve(16, 11, 3, 17);
         reserve(37, 11, 3, 17);
-        reserve(12, 7, 32, 2);               // lane in front of the pumps
+        reserve(11, 8, 34, 2);                  // lane between the pumps and the parked cars
 
-        // station front: garage shutters, shop crates
-        putLeft(GARAGE_GATE, 13, 3);
-        putLeft(GARAGE_GATE, 15, 3);
-        putLeft(CRATE_STACK, 18, 2);
-        putLeft(METAL_STACK, 20, 2);
-        putLeft(SIGN_EXIT, 24, 2);
-        putLeft(METAL_STACK_OPEN, 36, 2);
-        putLeft(CRATE_STACK, 38, 2);
-        putLeft(GARAGE_GATE, 40, 3);
-        // two pump islands and a burnt one
-        putLeft(PUMP_ROW, 14, 6);
-        putLeft(PUMP_ROW, 23, 6);
-        putLeft(PUMP_ROW_BURNT, 32, 6);
-        putLeft(CAR_BLUE_V, 20, 10);
-        putLeft(CAR_RED_H, 28, 10);
-        putLeft(CAR_BURNT_V, 41, 10);
-        putTile(BARREL_RED, 13, 10);
-        putTile(BARREL_ORANGE, 12, 10);
-        putLeft(TOOLBOXES, 33, 10);
-        putTile(GAS_TANK, 31, 10);
+        // shop front: crates and signs; garage: roller doors and parts
+        putLeft(CRATE_STACK, 12, 5);
+        putLeft(METAL_STACK_OPEN, 22, 5);
+        putLeft(BARREL_RED, 25, 4);
+        putLeft(SIGN_EXIT, 26, 3);
+        putLeft(GARAGE_GATE, 32, 4);
+        putLeft(GARAGE_GATE, 36, 4);
+        putLeft(GARAGE_GATE, 40, 4);
+        putLeft(TOOLBOXES, 34, 5);
+        putLeft(TIRES_LOW, 38, 5);
+        putLeft(GAS_TANK, 44, 4);
+        // pump islands
+        putLeft(PUMP_ROW, 14, 7);
+        putLeft(PUMP_ROW, 21, 7);
+        putLeft(PUMP_ROW_BURNT, 33, 7);
+        decal(PLANKS, 30 * T, 7 * T);
+        // parked cars below the pumps
+        putLeft(CAR_BLUE_V, 13, 12);
+        putLeft(CAR_RED_V, 21, 12);
+        putLeft(CAR_BURNT_V, 23, 12);
+        putLeft(VAN_BURNT_V, 34, 12);
+        putLeft(CAR_RED_H, 41, 11);
 
-        // the road: abandoned traffic
+        // tyre shop yard (north-west)
+        tyres(1, 2);
+        tyres(4, 2);
+        tyres(7, 2);
+        tyres(1, 6);
+        putLeft(TIRES_G, 5, 6);
+        putLeft(CAR_BURNT_V, 8, 7);
+        putLeft(CRATE_WOOD_G, 2, 10);
+        putLeft(CRATE_STACK_G, 5, 11);
+        putLeft(PUMP_BURNT, 8, 11);
+        putLeft(PUMP, 10, 14);
+
+        // fuel depot (north-east): barrels in rows
+        rowOf(BARREL_OIL, 46, 3, 4, 26);
+        rowOf(BARREL_GREY, 46, 5, 4, 26);
+        putLeft(BARREL_STACK, 51, 3);
+        putLeft(GAS_TANK, 53, 5);
+        putLeft(BARREL_STACK, 46, 9);
+        putLeft(BARREL_STACK, 48, 9);
+        putLeft(PUMP_G, 51, 10);
+        putLeft(METAL_STACK_G, 46, 12);
+
+        // parking lot (west) and container yard (east)
+        rowOf(CAR_RED_V, 2, 17, 1, 0);
+        putLeft(CAR_BLUE_V, 3, 17);
+        putLeft(CAR_BURNT_V, 5, 17);
+        putLeft(CAR_RED_V, 6, 17);
+        putLeft(VAN_BURNT_V, 9, 17);
+        putLeft(CAR_BURNT_H, 3, 23);
+        putLeft(VAN_BLUE_H, 8, 23);
+        putLeft(STOP_SIGN, 13, 25);
+        putLeft(METAL_STACK, 43, 16);
+        putLeft(METAL_STACK_G, 46, 16);
+        putLeft(METAL_STACK_OPEN, 50, 16);
+        putLeft(CRATE_STACK, 43, 22);
+        putLeft(CRATE_STACK_G, 47, 23);
+        putLeft(CRATE_METAL, 51, 22);
+        putLeft(CRATE_METAL_G, 52, 23);
+        putLeft(SIGN_DANGER, 41, 25);
+
+        // traffic on the road and junk beyond it
         putLeft(VAN_BURNT_H, 3, 27);
-        putLeft(CAR_RED_H, 9, 31);
+        putLeft(CAR_RED_H, 10, 31);
         putLeft(CAR_BURNT_H, 23, 27);
-        putLeft(VAN_BLUE_H, 30, 31);
+        putLeft(VAN_BLUE_H, 29, 31);
         putLeft(CAR_BURNT_H, 45, 27);
         putLeft(CAR_RED_H, 50, 31);
-        putLeft(STOP_SIGN, 14, 26);
-        putLeft(SIGN_DANGER, 42, 26);
-
-        // west: tyre shop yard; east: fuel depot with barrels; south of road: junk
-        putLeft(TIRES, 2, 4);
-        putLeft(TIRES_LOW, 3, 4);
-        putLeft(TIRES, 2, 7);
-        putLeft(TIRES_G, 5, 7);
-        putLeft(TIRES_LOW_G, 7, 4);
-        putLeft(CAR_BURNT_V, 9, 6);
-        putLeft(CRATE_WOOD_G, 3, 11);
-        putLeft(CRATE_STACK_G, 5, 13);
-        putLeft(PUMP_BURNT, 9, 14);
-        putLeft(BARREL_STACK, 46, 4);
-        putLeft(BARREL_STACK, 49, 4);
-        putLeft(GAS_TANK, 52, 4);
-        putLeft(BARREL_OIL, 46, 8);
-        putLeft(BARREL_OIL, 47, 8);
-        putLeft(BARREL_RED_G, 50, 8);
-        putLeft(METAL_STACK_G, 46, 13);
-        putLeft(PUMP_G, 51, 13);
-        scatter(new PropDef[]{CRATE_WOOD, BARREL_ORANGE_G, TIRES_LOW, CRATE_METAL}, 2, 16, 10, 9, 6, 60);
-        scatter(new PropDef[]{CRATE_METAL_G, BARREL_RED, TIRES_G}, 43, 16, 11, 9, 6, 60);
-        scatter(new PropDef[]{TIRES_LOW_G, CRATE_WOOD_G, BARREL_ORANGE, FENCE_BROKEN_A}, 2, 33, 52, 2, 8, 80);
-        sandPatches(6);
+        rowOf(FENCE_BROKEN_A, 2, 33, 1, 0);
+        tyres(8, 33);
+        putLeft(FENCE_BROKEN_B, 14, 33);
+        barrels(20, 33, BARREL_ORANGE_G, BARREL_RED, BARREL_ORANGE);
+        putLeft(FENCE_BROKEN_A, 33, 33);
+        tyres(40, 33);
+        putLeft(FENCE_BROKEN_B, 46, 33);
+        putLeft(CRATE_WOOD_G, 52, 33);
     }
 
     // ------------------------------------------------------------------ map 5: quarantine zone
     private void buildQuarantine() {
-        // dirt paths link four fenced compounds to the camp
-        paint(DIRT, 1, 17, COLS - 2, 3);
-        paint(DIRT, 26, 1, 4, ROWS - 2);
+        paint(DIRT, 0, 17, COLS, 3);
+        paint(DIRT, 26, 0, 4, ROWS);
         reserve(1, 17, COLS - 2, 3);
         reserve(26, 1, 4, ROWS - 2);
 
         // north-west compound: field hospital
         compound(3, 3, 6, 10, 2);
-        putLeft(TENT_GREEN, 4, 7);
-        putLeft(TENT_GREEN_FLAT, 7, 7);
-        putLeft(TENT_GREEN, 12, 7);
-        putLeft(TENT_GREEN_FLAT, 15, 7);
-        putLeft(WATER_TANK_V, 19, 6);
-        putTile(COT_V, 5, 11);
-        putTile(COT_V, 7, 11);
-        putTile(COT_H, 13, 11);
-        putLeft(BOX_MEDS, 16, 11);
-        putLeft(SIGN_QUARANTINE, 10, 14);
+        for (int c = 4; c <= 18; c += 4) {
+            putLeft(TENT_GREEN, c, 7);
+            putLeft(TENT_GREEN_FLAT, c + 1, 12);
+        }
+        rowOf(COT_V, 4, 9, 7, 64);
+        putLeft(WATER_TANK_V, 19, 9);
+        putLeft(BOX_MEDS, 6, 4);
+        putLeft(BOX_WATER, 8, 4);
 
-        // north-east compound: supply depot
+        // north-east compound: the lab building with crates in front
         compound(33, 3, 6, 10, 2);
-        putLeft(METAL_STACK, 34, 6);
-        putLeft(METAL_STACK_OPEN, 37, 6);
-        putLeft(CRATE_CLUSTER, 41, 6);
-        putLeft(BARREL_STACK, 45, 6);
-        putLeft(AMMO_CRATE_H, 48, 6);
-        putLeft(BOX_AMMO, 34, 10);
-        putLeft(AMMO_CRATE_V, 37, 11);
-        putLeft(PALLET, 44, 10);
-        putLeft(BOX_TOOLS, 47, 10);
-        putLeft(SIGN_KEEP_OUT, 40, 14);
+        building(35, 4, 9, 3);
+        putLeft(METAL_STACK, 45, 6);
+        putLeft(CRATE_CLUSTER, 47, 6);
+        putLeft(AMMO_CRATE_V, 50, 6);
+        putLeft(BOX_AMMO, 35, 10);
+        putLeft(AMMO_CRATE_H, 38, 9);
+        putLeft(BARREL_STACK, 45, 10);
+        putLeft(PALLET, 48, 10);
+        putLeft(BOX_TOOLS, 50, 10);
+        putLeft(SIGN_KEEP_OUT, 41, 13);
 
         // south-west compound: contamination dump
         compound(3, 22, 6, 9, 2);
-        putLeft(BARREL_OIL, 5, 25);
-        putLeft(BARREL_OIL, 6, 25);
-        putLeft(BARREL_GREY, 7, 25);
-        putLeft(GAS_TANK, 12, 25);
-        putLeft(BARREL_OIL, 16, 25);
+        rowOf(BARREL_OIL, 4, 26, 6, 24);
+        rowOf(BARREL_GREY, 4, 28, 5, 24);
+        putLeft(GAS_TANK, 12, 26);
+        putLeft(GAS_TANK, 13, 26);
+        putLeft(TRASH_C, 15, 26);
+        putLeft(TRASH_B, 17, 27);
+        putLeft(TRASH_A, 12, 29);
         putLeft(SIGN_TOXIC, 19, 25);
-        putLeft(TRASH_C, 5, 29);
-        putLeft(TRASH_B, 13, 29);
-        putLeft(TRASH_A, 17, 28);
-        putLeft(SIGN_WARNING, 9, 32);
+        putLeft(SIGN_WARNING, 4, 30);
 
         // south-east compound: decontamination sheds
         compound(33, 22, 6, 9, 2);
-        putLeft(SHED, 34, 26);
-        putLeft(STALL_A, 38, 26);
-        putLeft(SHED, 42, 26);
-        putLeft(STALL_B, 46, 26);
-        putLeft(WATER_TANK_H, 50, 25);
-        putLeft(BOX_EXTINGUISHER, 35, 29);
-        putLeft(SIDE_TABLE, 44, 29);
+        putLeft(SHED, 34, 27);
+        putLeft(SHED, 37, 27);
+        putLeft(STALL_A, 40, 27);
+        putLeft(STALL_B, 43, 27);
+        putLeft(SHED, 46, 27);
+        putLeft(WATER_TANK_H, 49, 25);
+        putLeft(BOX_EXTINGUISHER, 34, 30);
+        putLeft(SIDE_TABLE, 38, 30);
+        putLeft(BOX_TOOLS, 44, 30);
         putLeft(SIGN_ELECTRIC, 49, 29);
 
-        // checkpoint signs and debris along the paths
-        putLeft(SIGN_SHELTER, 23, 15);
-        putLeft(SIGN_WARNING, 31, 15);
-        putLeft(CRATE_METAL, 22, 22);
-        putLeft(BARREL_GREY, 32, 22);
-        putLeft(SIGN_QUARANTINE, 50, 15);
+        // checkpoints where the paths meet the compounds
         putLeft(SIGN_QUARANTINE, 2, 15);
+        putLeft(SIGN_QUARANTINE, 50, 15);
+        putLeft(SIGN_SHELTER, 23, 14);
+        putLeft(SIGN_WARNING, 31, 14);
+        barrels(22, 23, BARREL_GREY, BARREL_OIL, BARREL_GREY);
+        barrels(31, 23, BARREL_OIL, BARREL_GREY, BARREL_OIL);
+        putLeft(CRATE_METAL, 23, 2);
+        putLeft(CRATE_METAL_G, 31, 2);
+        putLeft(TRASH_A, 21, 33);
+        putLeft(TRASH_B, 33, 33);
+        putLeft(SIGN_WARNING, 23, 32);
         decal(PAPERS, 28 * T, 9 * T);
         decal(PAPERS_B, 14 * T, 18 * T);
         decal(SACK, 40 * T, 20 * T);
-        sandPatches(8);
     }
 
     /**
      * A chain-link compound: `panels` fence panels (3 tiles each) along the north and south sides,
-     * one-tile posts down the sides, and a gate gap of `gate` panels in the middle of the
-     * side that faces the main path.
+     * posts down the sides, and a gate gap of `gate` panels in the middle of the side that faces
+     * the main path (south for the northern compounds, north for the southern ones).
      */
     private void compound(int col, int row, int panels, int height, int gate) {
         int width = panels * 3;
         int gateStart = (panels - gate) / 2;
-        boolean south = row < ROWS / 2;   // northern compounds open to the south, southern to the north
+        boolean gateSouth = row < ROWS / 2;
         for (int i = 0; i < panels; i++) {
             boolean isGate = i >= gateStart && i < gateStart + gate;
-            if (!(south && isGate)) {
+            if (!(gateSouth && isGate)) {
                 fencePanel(col + i * 3, row + height, false);
             }
-            if (!(!south && isGate)) {
+            if (!(!gateSouth && isGate)) {
                 fencePanel(col + i * 3, row, i == 1);
             }
         }
@@ -1169,9 +1369,10 @@ public final class GameMap {
         fencePost((col + width) * T - 6, row, height);
     }
 
-    // chain-link fence pieces from the camp sheet
+    // fence pieces from the camp sheet
     private static final PropDef CHAIN_PANEL = new PropDef("fence", CAMP, 16, 16, 96, 36, 6, 0);
     private static final PropDef CHAIN_PANEL_SIGN = new PropDef("fence", CAMP, 16, 80, 96, 32, 6, 0);
+    private static final PropDef WOOD_FENCE = new PropDef("plank fence", CAMP, 16, 184, 128, 24, 8, 0);
 
     /** One chain-link panel, 3 tiles wide, standing on the bottom of tile row `row`. */
     private void fencePanel(int col, int row, boolean withSign) {
@@ -1202,74 +1403,89 @@ public final class GameMap {
         addSolid(solid);
     }
 
-    /** Small irregular dirt patches so the open sand does not look like one repeated tile. */
-    private void sandPatches(int count) {
-        for (int i = 0; i < count; i++) {
-            int w = 2 + rng.nextInt(3), h = 2 + rng.nextInt(2);
-            int col = 2 + rng.nextInt(COLS - 4 - w), row = 2 + rng.nextInt(ROWS - 4 - h);
-            paint(DIRT, col, row, w, h);
-            if (rng.nextBoolean()) {
-                paint(DIRT, col + 1, row + h, Math.max(1, w - 1), 1);
-            }
-        }
-    }
-
     // ------------------------------------------------------------------ ground rendering
     private BufferedImage tile(String sheet, int x, int y) {
         return AssetLoader.subImage(sheet, x, y, T, T);
     }
 
+    // palette taken from the tile sheets (sand specks, dirt specks, concrete cracks)
+    private static final int[] SAND_SPECKS = {0xFFAD7757, 0xFFAD7757, 0xFF9B6658, 0xFFCCA07F};
+    private static final int[] DIRT_SPECKS = {0xFF9B6658, 0xFF9B6658, 0xFFC09473, 0xFFCCA07F};
+    private static final int[] FLOOR_SPECKS = {0xFF788C8B, 0xFF6C8281, 0xFFA8B5B2};
+
+    /**
+     * Plain tiles from the sheets with a few specks of the sheet's own colours sprinkled on, so
+     * open ground has texture without the visible checkerboard of mixing differently coloured tiles.
+     */
+    private BufferedImage[] speckled(BufferedImage base, int[] palette, int count, int specksPerTile) {
+        BufferedImage[] out = new BufferedImage[count];
+        for (int i = 0; i < count; i++) {
+            BufferedImage img = new BufferedImage(T, T, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = img.createGraphics();
+            g.drawImage(base, 0, 0, null);
+            g.dispose();
+            int n = i == 0 ? 0 : 1 + rng.nextInt(specksPerTile);
+            for (int k = 0; k < n; k++) {
+                int x = 1 + rng.nextInt(T - 3), y = 1 + rng.nextInt(T - 3);
+                int color = palette[rng.nextInt(palette.length)];
+                img.setRGB(x, y, color);
+                if (rng.nextBoolean()) {
+                    img.setRGB(x + 1, y, color);
+                }
+                if (rng.nextInt(4) == 0) {
+                    img.setRGB(x, y + 1, color);
+                }
+            }
+            out[i] = img;
+        }
+        return out;
+    }
+
     private void renderGround() {
         ground = new BufferedImage(COLS * T, ROWS * T, BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = ground.createGraphics();
-        BufferedImage[] sand = variants(tile(WASTE, 32, 32), tile(WASTE, 224, 64));
-        BufferedImage[] sandRare = variants(tile(WASTE, 224, 0), tile(WASTE, 224, 32));
-        BufferedImage[] dirt = {tile(WASTE, 160, 0), AssetLoader.flipHorizontal(tile(WASTE, 160, 0)),
-            tile(WASTE, 192, 0), tile(WASTE, 192, 32), tile(WASTE, 160, 32)};
-        BufferedImage[] floor = variants(tile(INTER, 224, 32), tile(INTER, 224, 64));
-        BufferedImage[] floorRare = variants(tile(INTER, 224, 96), tile(INTER, 96, 192));
+        BufferedImage[] sand = speckled(tile(WASTE, 32, 32), SAND_SPECKS, 12, 6);
+        BufferedImage[] dirt = speckled(tile(WASTE, 160, 0), DIRT_SPECKS, 8, 4);
+        BufferedImage[] dirtRare = {tile(WASTE, 192, 0), tile(WASTE, 192, 32), AssetLoader.flipHorizontal(tile(WASTE, 192, 32))};
+        BufferedImage[] floor = speckled(tile(INTER, 32, 64), FLOOR_SPECKS, 8, 3);
+        BufferedImage[] floorRare = {tile(INTER, 96, 192), tile(INTER, 128, 192), tile(INTER, 96, 96)};
         Map<Integer, BufferedImage> dirtEdges = new HashMap<>();
         for (int r = 0; r < ROWS; r++) {
             for (int c = 0; c < COLS; c++) {
                 BufferedImage img;
                 int roll = rng.nextInt(100);
                 if (terrain[r][c] == FLOOR) {
-                    img = roll < 85 ? floor[roll % floor.length] : floorRare[roll % floorRare.length];
+                    img = roll < 90 ? floor[roll % floor.length] : floorRare[roll % floorRare.length];
                 } else if (terrain[r][c] == DIRT) {
                     int mask = sandMask(c, r);
-                    if (mask == 0) {
-                        img = dirt[roll < 60 ? roll % 2 : 2 + roll % 3];
-                    } else {
-                        BufferedImage base = dirt[roll % 2];
-                        int key = mask * 2 + (roll % 2);
-                        img = dirtEdges.get(key);
+                    if (mask != 0) {
+                        img = dirtEdges.get(mask);
                         if (img == null) {
-                            img = buildDirtEdge(base, mask);
-                            dirtEdges.put(key, img);
+                            img = buildDirtEdge(dirt[0], mask);
+                            dirtEdges.put(mask, img);
                         }
+                    } else {
+                        img = roll < 94 ? dirt[roll % dirt.length] : dirtRare[roll % dirtRare.length];
                     }
                 } else {
-                    img = roll < 92 ? sand[roll % sand.length] : sandRare[roll % sandRare.length];
+                    img = sand[roll % sand.length];
                 }
                 g.drawImage(img, c * T, r * T, null);
             }
+        }
+        g.setColor(new Color(0xCC, 0xA0, 0x7F, 150));
+        for (Rectangle d : dashes) {
+            g.fill(d);
         }
         for (int[] d : decals) {
             PropDef def = decalDefs.get(d[0]);
             g.drawImage(def.images()[0], d[1], d[2], null);
         }
-        if (type == GameData.MapType.ABANDONED_BUNKER) {
-            drawWalls(g);
-        } else {
+        drawWalls(g);
+        if (type != GameData.MapType.ABANDONED_BUNKER) {
             drawFenceBorder(g);
         }
         g.dispose();
-    }
-
-    /** A tile and its mirror images, so a few source tiles give many different-looking cells. */
-    private static BufferedImage[] variants(BufferedImage a, BufferedImage b) {
-        return new BufferedImage[]{a, b, AssetLoader.flipHorizontal(a), AssetLoader.flipHorizontal(b),
-            AssetLoader.flipVertical(a), AssetLoader.flipVertical(b)};
     }
 
     private boolean isSandAt(int c, int r) {
@@ -1375,8 +1591,10 @@ public final class GameMap {
         return out;
     }
 
-    // walls (bunker): light top surface with a dark outline, front faces with a baseboard
-    private static final int WALL_LINE = 0xFF1F2E33;
+    // walls: a dark roof/top surface with a light rim, and front faces (concrete with a baseboard)
+    private static final Color WALL_OUTLINE = new Color(0x1F2E33);
+    private static final Color WALL_TOP = new Color(0x465E62);
+    private static final Color WALL_RIM = new Color(0x6C8281);
 
     private boolean isWall(int c, int r) {
         if (c < 0 || r < 0 || c >= COLS || r >= ROWS) {
@@ -1386,7 +1604,6 @@ public final class GameMap {
     }
 
     private void drawWalls(Graphics2D g) {
-        BufferedImage top = tile(INTER, 32, 48);
         BufferedImage face = tile(INTER, 32, 160);
         BufferedImage[] faceDeco = {tile(INTER, 160, 96), tile(INTER, 192, 96), tile(INTER, 160, 128)};
         for (int r = 0; r < ROWS; r++) {
@@ -1397,47 +1614,41 @@ public final class GameMap {
                 int x = c * T, y = r * T;
                 boolean front = !isWall(c, r + 1);
                 if (front) {
-                    BufferedImage img = (r <= 2 && rng.nextInt(5) == 0) ? faceDeco[rng.nextInt(faceDeco.length)] : face;
-                    g.drawImage(img, x, y, null);
-                    if (!isWall(c, r - 1)) {
-                        g.drawImage(top.getSubimage(0, 0, T, 8), x, y, null);
-                        line(g, x, y, T, 2);
-                    }
+                    boolean deco = rng.nextInt(6) == 0;
+                    g.drawImage(deco ? faceDeco[rng.nextInt(faceDeco.length)] : face, x, y, null);
+                    g.setColor(WALL_OUTLINE);
                     if (!isWall(c - 1, r)) {
-                        line(g, x, y, 2, T);
+                        g.fillRect(x, y, 2, T);
                     }
                     if (!isWall(c + 1, r)) {
-                        line(g, x + T - 2, y, 2, T);
+                        g.fillRect(x + T - 2, y, 2, T);
+                    }
+                    if (!isWall(c, r - 1)) {
+                        g.fillRect(x, y, T, 2);
                     }
                 } else {
-                    g.drawImage(top, x, y, null);
-                    if (!isWall(c, r - 1)) {
-                        line(g, x, y, T, 2);
-                    }
-                    if (!isWall(c - 1, r)) {
-                        line(g, x, y, 2, T);
-                    }
-                    if (!isWall(c + 1, r)) {
-                        line(g, x + T - 2, y, 2, T);
-                    }
-                    if (!isWall(c, r + 1)) {
-                        line(g, x, y + T - 2, T, 2);
-                    }
+                    g.setColor(WALL_TOP);
+                    g.fillRect(x, y, T, T);
+                    // the rim shows where the top surface ends; the outline is the wall's silhouette
+                    g.setColor(WALL_RIM);
+                    if (!isWall(c, r - 1)) g.fillRect(x, y + 2, T, 1);
+                    if (!isWall(c - 1, r)) g.fillRect(x + 2, y, 1, T);
+                    if (!isWall(c + 1, r)) g.fillRect(x + T - 3, y, 1, T);
+                    if (!isWall(c, r + 1)) g.fillRect(x, y + T - 3, T, 1);
+                    g.setColor(WALL_OUTLINE);
+                    if (!isWall(c, r - 1)) g.fillRect(x, y, T, 2);
+                    if (!isWall(c - 1, r)) g.fillRect(x, y, 2, T);
+                    if (!isWall(c + 1, r)) g.fillRect(x + T - 2, y, 2, T);
+                    if (!isWall(c, r + 1)) g.fillRect(x, y + T - 2, T, 2);
                 }
             }
         }
     }
 
-    private static void line(Graphics2D g, int x, int y, int w, int h) {
-        g.setColor(new Color(WALL_LINE, true));
-        g.fillRect(x, y, w, h);
-    }
-
     /** Outdoor maps: a chain-link (or palisade) fence around the whole arena. */
     private void drawFenceBorder(Graphics2D g) {
         boolean palisade = type == GameData.MapType.SURVIVOR_CAMP;
-        BufferedImage panel = palisade ? AssetLoader.subImage(CAMP, 304, 721, 32, 63)
-                : AssetLoader.subImage(CAMP, 16, 16, 96, 36);
+        BufferedImage panel = palisade ? LOGS_TIED.images()[0] : CHAIN_PANEL.images()[0];
         BufferedImage post = AssetLoader.subImage(CAMP, 16, 50, 6, 30);
         // top and bottom rows
         int step = palisade ? 24 : panel.getWidth();
@@ -1455,7 +1666,7 @@ public final class GameMap {
         // left and right columns
         for (int y = 0; y < ROWS * T; y += post.getHeight()) {
             if (palisade) {
-                BufferedImage log = AssetLoader.subImage(CAMP, 347, 726, 11, 58);
+                BufferedImage log = LOG_SINGLE.images()[0];
                 g.drawImage(log, T - 14, y, null);
                 g.drawImage(log, COLS * T - T + 3, y, null);
             } else {
@@ -1466,8 +1677,15 @@ public final class GameMap {
     }
 
     // ------------------------------------------------------------------ analysis after building
+    /**
+     * Marks tiles a monster can stand in, and which neighbouring tiles are really connected: two
+     * open tiles can still be separated by a slit too narrow for a body (e.g. between a table and
+     * an NPC), so each link is tested by sliding a feet-sized box from centre to centre.
+     */
     private void computeWalkable() {
         walkable = new boolean[ROWS][COLS];
+        openEast = new boolean[ROWS][COLS];
+        openSouth = new boolean[ROWS][COLS];
         Rectangle probe = new Rectangle();
         for (int r = 0; r < ROWS; r++) {
             for (int c = 0; c < COLS; c++) {
@@ -1475,22 +1693,46 @@ public final class GameMap {
                 walkable[r][c] = !isBlocked(probe);
             }
         }
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                double cx = c * T + T / 2.0, cy = r * T + T / 2.0;
+                openEast[r][c] = c + 1 < COLS && walkable[r][c] && walkable[r][c + 1] && hasClearPath(cx, cy, cx + T, cy);
+                openSouth[r][c] = r + 1 < ROWS && walkable[r][c] && walkable[r + 1][c] && hasClearPath(cx, cy, cx, cy + T);
+            }
+        }
     }
 
-    /** Spawn points: tiles within 3 tiles of the border, roomy enough for the boss, reachable from camp. */
+    /** True if a walker can step between the two orthogonally neighbouring tiles. */
+    private boolean isLinked(int c, int r, int nc, int nr) {
+        if (!isWalkableTile(c, r) || !isWalkableTile(nc, nr)) {
+            return false;
+        }
+        if (nr == r) {
+            return openEast[r][Math.min(c, nc)];
+        }
+        return openSouth[Math.min(r, nr)][c];
+    }
+
+    /**
+     * Spawn points: tiles within 3 tiles of the border, reachable from the camp, where both a normal
+     * monster and the boss fit when their hitbox centre is put on the point.
+     */
     private void findSpawnPoints() {
         int[][] fromCamp = new int[ROWS][COLS];
         fillDistances(fromCamp, playerSpawn.x / T, playerSpawn.y / T);
-        Rectangle bossFeet = new Rectangle();
+        GameData.MonsterType big = GameData.MonsterType.ZOMBIE_BOSS;
         for (int r = 1; r < ROWS - 1; r++) {
             for (int c = 1; c < COLS - 1; c++) {
                 boolean nearEdge = r <= 3 || c <= 3 || r >= ROWS - 4 || c >= COLS - 4;
                 if (!nearEdge || fromCamp[r][c] == FAR) {
                     continue;
                 }
-                bossFeet.setBounds(c * T + 4, r * T + 12, T - 8, 12);
-                if (!isBlocked(bossFeet)) {
-                    spawnPoints.add(new Point(c * T + T / 2, r * T + T / 2 + 2));
+                Point p = new Point(c * T + T / 2, r * T + 8);
+                // feet boxes exactly as Entity.getFeetBounds() will compute them
+                Rectangle bossFeet = new Rectangle(p.x - big.hitboxW / 2, p.y + big.hitboxH / 2 - 8, big.hitboxW, 8);
+                Rectangle smallFeet = new Rectangle(p.x - 7, p.y + 1, 14, 8);
+                if (!isBlocked(bossFeet) && !isBlocked(smallFeet)) {
+                    spawnPoints.add(p);
                 }
             }
         }

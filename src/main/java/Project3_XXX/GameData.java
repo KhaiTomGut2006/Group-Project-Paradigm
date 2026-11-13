@@ -16,6 +16,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 
 /**
  * All game data in one place: constants, enums that carry balance numbers, the crafting
@@ -62,6 +63,17 @@ public final class GameData {
     public static final int BOSS_EVERY_WAVES = 3;           // a boss arrives on wave 3, 6, 9 ...
     public static final int MAX_LIVE_MONSTERS = 120;        // cap so the frame rate holds
     public static final int ITEM_LIFETIME_SECONDS = 45;     // dropped loot disappears after this
+
+    /** Monster health multiplier: +12% per wave, and difficulty 1..5 gives 0.7x .. 1.3x (3 = normal). */
+    public static double monsterHpScale(int wave, int difficulty) {
+        return (0.55 + 0.15 * difficulty) * (1.0 + 0.12 * Math.max(0, wave - 1));
+    }
+
+    /** How many monsters one spawner wake-up adds: grows with the wave and difficulty, doubled by Double Spawn. */
+    public static int spawnBatchSize(int wave, int difficulty, boolean doubleSpawn) {
+        int n = 2 + wave + (difficulty - 1) / 2;
+        return Math.min(14, doubleSpawn ? n * 2 : n);
+    }
 
     /** Converts milliseconds to whole simulation ticks (at least 1). */
     public static int msToTicks(int ms) {
@@ -286,6 +298,29 @@ public final class GameData {
             this.firstWave = firstWave;
             this.spawnWeight = spawnWeight;
             this.drops = drops;
+        }
+
+        /**
+         * Picks a random non-boss monster that is allowed in this wave, weighted by spawnWeight
+         * (bosses are spawned separately every BOSS_EVERY_WAVES waves).
+         */
+        public static MonsterType randomForWave(int wave, Random rng) {
+            int total = 0;
+            for (MonsterType t : values()) {
+                if (t.spawnWeight > 0 && wave >= t.firstWave) {
+                    total += t.spawnWeight;
+                }
+            }
+            int roll = rng.nextInt(Math.max(1, total));
+            for (MonsterType t : values()) {
+                if (t.spawnWeight > 0 && wave >= t.firstWave) {
+                    roll -= t.spawnWeight;
+                    if (roll < 0) {
+                        return t;
+                    }
+                }
+            }
+            return ZOMBIE_NORMAL;
         }
 
         /** The drop table (a copy, so nobody can change the balance by accident). */

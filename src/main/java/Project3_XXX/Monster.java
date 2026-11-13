@@ -9,6 +9,7 @@ import java.awt.AlphaComposite;
 import java.awt.Color;
 import java.awt.Composite;
 import java.awt.Graphics2D;
+import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +35,7 @@ public final class Monster extends Entity {
     private final GameData.MonsterType type;
     private final Player target;
     private final BufferedImage[] runFrames, hitFrames, deathFrames;
+    private final BufferedImage[] aimFrames;   // bandit only: stands still (idle strip) while aiming
 
     private int attackCooldown;      // ticks until the next bite is allowed
     private int rangedCooldown;      // ticks until the next shot
@@ -61,6 +63,7 @@ public final class Monster extends Entity {
         this.runFrames = AssetLoader.loadStrip(type.runStrip(), 8);
         this.hitFrames = AssetLoader.loadStrip(type.hitStrip(), 3);
         this.deathFrames = AssetLoader.loadStrip(type.deathStrip(), 8);
+        this.aimFrames = type == GameData.MonsterType.BANDIT_SHOOTER ? AssetLoader.loadStrip("characters/bandit_idle.png", 6) : runFrames;
         // spread out the timers so a big wave does not attack/shoot/re-path on the same tick
         int seed = (int) (x * 7 + y * 13);
         this.animTimer = Math.floorMod(seed, 64);
@@ -68,6 +71,9 @@ public final class Monster extends Entity {
         this.rangedCooldown = GameData.msToTicks(type.rangedCooldownMs / 2 + Math.floorMod(seed, 900));
         this.strafeSign = (seed & 1) == 0 ? 1 : -1;
         this.chaseAngle = target == null ? 0 : Math.atan2(target.getY() - y, target.getX() - x);
+        if (map != null) {
+            pushOutOfWalls();   // safety net if a caller spawns it on a blocked spot
+        }
     }
 
     public GameData.MonsterType getType() {
@@ -101,7 +107,9 @@ public final class Monster extends Entity {
         if (hitAnim > 0) {
             return;   // staggered while the hit animation plays
         }
-        moveTowardsTarget(dist);
+        if (aimWarning == 0) {
+            moveTowardsTarget(dist);   // a bandit stands still while it aims (fair warning)
+        }
         updateRangedAttack(dist);
     }
 
@@ -109,7 +117,7 @@ public final class Monster extends Entity {
     private void moveTowardsTarget(double dist) {
         if (--repathTimer <= 0) {
             repathTimer = 6;
-            chaseAngle = map == null ? angleTo(target) : map.getChaseAngle(x, getFeetY() - 4, target.getX(), target.getFeetY() - 4);
+            chaseAngle = map == null ? angleTo(target) : map.getChaseAngle(x, getFeetY() - 4, target.getX(), target.getFeetY() - 4, width);
         }
         double moveAngle = chaseAngle;
         double moveSpeed = speed;
@@ -127,12 +135,13 @@ public final class Monster extends Entity {
             nudgeTicks--;
             moveAngle = nudgeAngle;
         }
-        boolean free = moveWithCollision(Math.cos(moveAngle) * moveSpeed, Math.sin(moveAngle) * moveSpeed);
-        if (free) {
-            stuckTicks = 0;
+        double oldX = x, oldY = y;
+        moveWithCollision(Math.cos(moveAngle) * moveSpeed, Math.sin(moveAngle) * moveSpeed);
+        if (Math.hypot(x - oldX, y - oldY) > moveSpeed * 0.3) {
+            stuckTicks = 0;   // moving (sliding along a wall counts as moving)
             return;
         }
-        // blocked: after a short while, step sideways for a moment so we do not grind on a corner
+        // barely moving: after a short while, step sideways for a moment so we do not grind on a corner
         stuckTicks++;
         if (stuckTicks > 12) {
             stuckTicks = 0;
@@ -156,6 +165,7 @@ public final class Monster extends Entity {
                         type.rangedProjectile, type.damage, type.rangedRange + 60);
                 pendingShot.setMap(map);
                 rangedCooldown = GameData.msToTicks(type.rangedCooldownMs);
+                AssetLoader.playSound(type.rangedProjectile == GameData.Projectile.TOXIC_SPIT ? "toxic_spit" : "enemy_shoot");
             }
             return;
         }
@@ -170,7 +180,7 @@ public final class Monster extends Entity {
         if (!alive || target == null || !target.isAlive() || attackCooldown > 0) {
             return 0;
         }
-        java.awt.Rectangle reach = getBounds();
+        Rectangle reach = getBounds();
         reach.grow(3, 3);
         if (!reach.intersects(target.getBounds())) {
             return 0;
@@ -209,9 +219,11 @@ public final class Monster extends Entity {
                 hitAnim = 8;
             }
             aimWarning = 0;   // getting shot interrupts aiming
+            AssetLoader.playSound("hit");
         } else {
             deathTick = 0;
             pendingShot = null;
+            AssetLoader.playSound(type == GameData.MonsterType.ZOMBIE_BOSS ? "boss_roar" : "monster_death");
         }
         return !alive;
     }
@@ -265,7 +277,8 @@ public final class Monster extends Entity {
                     dy = 0;
                     d = 1;
                 }
-                double push = Math.min(0.6, (minDist - d) * 0.25);
+                // weaker than walking speed, so a crowd squeezing through a door still makes progress
+                double push = Math.min(0.3, (minDist - d) * 0.2);
                 double px = dx / d * push, py = dy / d * push;
                 a.moveWithCollision(-px, -py);
                 b.moveWithCollision(px, py);
@@ -285,6 +298,8 @@ public final class Monster extends Entity {
         BufferedImage frame;
         if (hitAnim > 0) {
             frame = hitFrames[Math.min(hitFrames.length - 1, (8 - hitAnim) / 3)];
+        } else if (aimWarning > 0) {
+            frame = aimFrames[(animTimer / 6) % aimFrames.length];
         } else {
             frame = runFrames[(animTimer / 5) % runFrames.length];
         }
