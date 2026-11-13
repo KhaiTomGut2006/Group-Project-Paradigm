@@ -5,6 +5,7 @@
 package Project3_6813107;
 
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Graphics;
@@ -117,24 +118,25 @@ public final class GameFrame extends JFrame implements ActionListener {
     /** Heart, health, armour, status | wave and time | score, kills, auto-fire, pause, quit. */
     private JComponent buildTopBar() {
         heartIcon = new JLabel();
-        hpBar = Theme.bar(Theme.Fill.HEALTH, 170, Theme.S);
+        hpBar = Theme.bar(Theme.Fill.HEALTH, 140, Theme.S);
         hpValueLabel = new Theme.PixelLabel("100/100", 2, Theme.TEXT);
         armorSegments = new JLabel();
         armorSegments.setToolTipText("Armour level (Workshop: Craft Armor Plating)");
         poisonedIcon = statusIcon("poisoned", "Poisoned: you lose HP for a few seconds");
         injuredIcon = statusIcon("injured", "Badly hurt: press E to use a medkit");
         bleedingIcon = statusIcon("bleeding", "You were just hit");
-        JPanel left = Theme.row(10, heartIcon, column(stack(hpBar), hpValueLabel),
+        JPanel left = Theme.row(8, heartIcon, column(stack(hpBar), hpValueLabel),
                 column(armorSegments, Theme.caption("Armor")), Theme.row(2, poisonedIcon, injuredIcon, bleedingIcon));
 
-        waveLabel = new Theme.PixelLabel("WAVE 1", 2, Theme.TEXT_2);
+        waveLabel = new Theme.PixelLabel("DAY 1: DAYLIGHT - SAFE CAMP", 2, Theme.TEXT_2);
         timerLabel = new Theme.PixelLabel("5:00", 4, Theme.TEXT);
         timerLabel.setShadow(true);
         waveBar = Theme.bar(Theme.Fill.STAMINA, 170, 1);
         JPanel middle = Theme.transparentPanel(new GridBagLayout());
         middle.add(column(centred(waveLabel), centred(timerLabel), centred(waveBar)));
 
-        scoreValueLabel = new Theme.PixelLabel("0", 3, Theme.TEXT);
+        scoreValueLabel = new Theme.PixelLabel("G0 W0 M0 F0", 2, Theme.GOLD);
+        scoreValueLabel.setToolTipText("Base Camp levels: Guard Posts, Walls, Med Tent, Supply Depot");
         killsValueLabel = new Theme.PixelLabel("0", 3, Theme.TEXT);
         autoFireBox = new JCheckBox("Auto-fire", settings.autoFire);
         Theme.styleCheckBox(autoFireBox);
@@ -142,8 +144,8 @@ public final class GameFrame extends JFrame implements ActionListener {
         autoFireBox.addActionListener(this);
         pauseButton = makeButton("Pause", Theme.ButtonStyle.GREY, "p");
         quitButton = makeButton("Quit", Theme.ButtonStyle.GREY, null);
-        JPanel right = Theme.row(14, column(Theme.caption("Score"), scoreValueLabel),
-                column(Theme.caption("Kills"), killsValueLabel), autoFireBox, Theme.row(4, pauseButton, quitButton));
+        JPanel right = Theme.row(10, column(Theme.caption("Camp"), scoreValueLabel),
+                column(Theme.caption("Hostiles"), killsValueLabel), autoFireBox, Theme.row(4, pauseButton, quitButton));
 
         return makePlate(left, middle, right);
     }
@@ -166,7 +168,7 @@ public final class GameFrame extends JFrame implements ActionListener {
             itemSlots.put(t, slot);
             backpackRow.add(slot);
         }
-        emptyBackpackLabel = new JLabel("Backpack empty - kill monsters to collect parts");
+        emptyBackpackLabel = new JLabel("Pack empty - scavenge outside & loot chests");
         emptyBackpackLabel.setFont(Theme.font(java.awt.Font.PLAIN, 12));
         emptyBackpackLabel.setForeground(Theme.TEXT_3);
         backpackRow.add(emptyBackpackLabel);
@@ -179,8 +181,8 @@ public final class GameFrame extends JFrame implements ActionListener {
 
     /** A HUD strip on the kit's metal panel: left, centre and right groups. */
     private static JComponent makePlate(JComponent left, JComponent middle, JComponent right) {
-        Theme.Card plate = new Theme.Card(new BorderLayout(14, 0), Theme.Panel.METAL);
-        plate.setBorder(new EmptyBorder(8, 18, 8, 18));
+        Theme.Card plate = new Theme.Card(new BorderLayout(10, 0), Theme.Panel.METAL);
+        plate.setBorder(new EmptyBorder(8, 14, 8, 14));
         plate.add(centred(left), BorderLayout.WEST);
         plate.add(middle, BorderLayout.CENTER);
         plate.add(centred(right), BorderLayout.EAST);
@@ -255,7 +257,11 @@ public final class GameFrame extends JFrame implements ActionListener {
         injuredIcon.setVisible(p.isAlive() && hpPercent < 30);
         bleedingIcon.setVisible(p.isHurt());
         refreshWaveAndTime();
-        scoreValueLabel.setText(String.valueOf(gamePanel.getScore()));
+        String campStatus = "G" + p.getLevel(GameData.RecipeKind.BASE_TURRET)
+                + " W" + p.getLevel(GameData.RecipeKind.BASE_WALL)
+                + " M" + p.getLevel(GameData.RecipeKind.BASE_MEDIC)
+                + " F" + p.getLevel(GameData.RecipeKind.BASE_FARM);
+        scoreValueLabel.setText(campStatus);
         killsValueLabel.setText(String.valueOf(gamePanel.getKills()));
         pauseButton.setText(gamePanel.isPaused() ? "RESUME" : "PAUSE");
         hotbar.update(p);
@@ -264,21 +270,13 @@ public final class GameFrame extends JFrame implements ActionListener {
     }
 
     private void refreshWaveAndTime() {
-        int wave = gamePanel.getWave();
+        int day = gamePanel.getDay();
         int elapsed = gamePanel.getElapsedSeconds();
         int left = Math.max(0, gamePanel.getTimeLimitSeconds() - elapsed);
-        int nextWaveIn = GameData.WAVE_SECONDS - elapsed % GameData.WAVE_SECONDS;
-        String next;
-        if (left <= GameData.WAVE_SECONDS) {
-            next = "FINAL WAVE";
-        } else if ((wave + 1) % GameData.BOSS_EVERY_WAVES == 0) {
-            next = "BOSS IN " + formatTime(nextWaveIn);
-        } else {
-            next = "NEXT IN " + formatTime(nextWaveIn);
-        }
-        String phase = gamePanel.isRaidPhase() ? "RAID!" : "SCAVENGE";
-        waveLabel.setText("WAVE " + wave + ": " + phase + " - " + next);
-        waveLabel.setColor(gamePanel.isRaidPhase() || next.startsWith("BOSS") ? Theme.RED : Theme.TEXT_2);
+        String phase = gamePanel.isNight() ? "NIGHTFALL" : "DAYLIGHT";
+        String zone = gamePanel.isPlayerInBase() ? "SAFE CAMP" : "WASTELAND";
+        waveLabel.setText("DAY " + day + ": " + phase + " - " + zone);
+        waveLabel.setColor(gamePanel.isNight() ? Theme.RED : (gamePanel.isPlayerInBase() ? new Color(0x88D470) : Theme.GOLD));
         waveBar.setValue(gamePanel.getWaveProgressPercent());
         timerLabel.setText(formatTime(left));
         timerLabel.setColor(left <= 30 ? Theme.GOLD : Theme.TEXT);
@@ -320,7 +318,7 @@ public final class GameFrame extends JFrame implements ActionListener {
      */
     private static final class HotbarView extends JComponent {
         private static final long serialVersionUID = 1L;
-        private static final GameData.WeaponType[] WEAPONS = GameData.WeaponType.values();
+        private static final GameData.WeaponType[] WEAPONS = GameData.HOTBAR_WEAPONS;
         private final transient BufferedImage[] icons = new BufferedImage[WEAPONS.length];
         private final boolean[] owned = new boolean[WEAPONS.length];
         private GameData.WeaponType current;
@@ -330,7 +328,7 @@ public final class GameFrame extends JFrame implements ActionListener {
                 icons[i] = Theme.fit(AssetLoader.getWeaponIcon(WEAPONS[i]), 32, 32);
             }
             setPreferredSize(new Dimension(Theme.hotbarWidth(WEAPONS.length, Theme.S), 26 * Theme.S));
-            setToolTipText("Weapons: press 1-8 or turn the mouse wheel");
+            setToolTipText("Weapons: press 1-7 or turn the mouse wheel");
         }
 
         void update(Player p) {
@@ -472,16 +470,16 @@ public final class GameFrame extends JFrame implements ActionListener {
         entry.seconds = gamePanel.getElapsedSeconds();
         GameData.saveScore(entry);
         String[][] stats = {
-            {"Score", String.valueOf(entry.score)},
-            {"Kills", String.valueOf(entry.kills)},
-            {"Wave reached", String.valueOf(entry.wave)},
-            {"Time survived", formatTime(entry.seconds)},
-            {"Map", entry.map.toUpperCase()}
+            {"Days survived", entry.wave + " / 10"},
+            {"Infected killed", String.valueOf(entry.kills)},
+            {"Base upgrades", gamePanel.getTotalBaseLevel() + " built"},
+            {"Survival time", formatTime(entry.seconds)},
+            {"Region", entry.map.toUpperCase()}
         };
         Theme.ask(this, Theme.Panel.METAL, survived ? "titles/survived" : "titles/game_over",
                 survived ? "Survived" : "Game over",
-                (survived ? "The horde is gone and the camp still stands. " : "The horde got you this time. ")
-                        + "Your score is saved in the high-score table.",
+                (survived ? "Extraction arrived and the camp held through the night. " : "The infected overwhelmed you. ")
+                        + "Your survival log is saved.",
                 stats, "Continue", null);
         closeGame();
     }

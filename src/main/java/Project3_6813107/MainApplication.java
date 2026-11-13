@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
-import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
@@ -81,11 +80,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     // ---- play tab
     private Theme.KitField nameField;
     private JLabel nameHintLabel;
-    private final JRadioButton[] classRadios = new JRadioButton[GameData.PlayerClass.values().length];
+    private JRadioButton[] classRadios = new JRadioButton[GameData.PlayerClass.values().length];
     private final ButtonGroup classGroup = new ButtonGroup();
     private JTextArea classInfoArea;
-    private JComboBox<GameData.WeaponType> weaponCombo;
-    private JTextArea weaponInfoArea;
     private JComboBox<GameData.MapType> mapCombo;
     private JTextArea mapInfoArea;
     private JSlider difficultySlider;
@@ -126,7 +123,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         // show the starting selection everywhere before the window appears
         showClassInfo();
-        showWeaponInfo();
         showMapInfo();
         showVolume();
         updateDifficultyReadout();
@@ -149,8 +145,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         title.add(Theme.row(0, new Theme.PixelLabel("EGCO 213 - GROUP PROJECT 3", 2, Theme.GOLD)));
         title.add(Theme.row(0, shadowed("LAST CAMP", 6, Theme.TEXT)));
         title.add(Theme.row(0, shadowed("SURVIVOR", 6, Theme.GOLD)));
-        title.add(Theme.row(0, new Theme.PixelLabel("KILL. LOOT. CRAFT. SURVIVE "
-                + formatTime(GameData.TIME_LIMIT_SECONDS) + ".", 2, Theme.TEXT_2)));
+        title.add(Theme.row(0, new Theme.PixelLabel("SCAVENGE. BUILD CAMP. SURVIVE.", 2, Theme.TEXT_2)));
         hero.add(title, BorderLayout.NORTH);
 
         JPanel crew = Theme.transparentPanel(new GridLayout(0, 1, 0, 4));
@@ -266,12 +261,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(classButtons, 7);
         form.add(classInfoArea, 6);
 
-        weaponCombo = new JComboBox<>(GameData.START_WEAPONS);
-        weaponCombo.setSelectedItem(GameData.WeaponType.PISTOL);
-        Theme.styleCombo(weaponCombo, new WeaponRenderer());
-        weaponCombo.addActionListener(this);
-        weaponInfoArea = Theme.textBlock("", 12, Theme.TEXT_2);
-        weaponInfoArea.setRows(2);
         mapCombo = new JComboBox<>(GameData.MapType.values());
         Theme.styleCombo(mapCombo, new Theme.ListRenderer<GameData.MapType>() {
             private static final long serialVersionUID = 1L;
@@ -284,9 +273,11 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         mapCombo.addActionListener(this);
         mapInfoArea = Theme.textBlock("", 12, Theme.TEXT_2);
         mapInfoArea.setRows(2);
+        JTextArea gearArea = Theme.textBlock("Survival Knife (Melee) + Class Supplies.\n"
+                + "Scavenge parts outside to craft guns & fortify camp.", 12, Theme.TEXT_2);
         JPanel loadout = Theme.transparentPanel(new GridLayout(1, 2, 14, 0));
-        loadout.add(fieldColumn("Weapon", weaponCombo, weaponInfoArea));
-        loadout.add(fieldColumn("Map", mapCombo, mapInfoArea));
+        loadout.add(fieldColumn("Starting Gear", Theme.label("Survival Knife Only", Font.BOLD, 13, Theme.GOLD), gearArea));
+        loadout.add(fieldColumn("Region", mapCombo, mapInfoArea));
         form.add(loadout, 14);
 
         difficultySlider = new JSlider(1, 5, 3);
@@ -296,7 +287,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         difficultySlider.addChangeListener(this);
         difficultyValueLabel = new Theme.PixelLabel("", 2, Theme.GOLD);
         difficultyInfoLabel = Theme.label("", Font.PLAIN, 12, Theme.TEXT_2);
-        form.add(headerWithValue("Difficulty", difficultyValueLabel), 14);
+        form.add(headerWithValue("Hazard Level", difficultyValueLabel), 14);
         form.add(difficultySlider, 4);
         form.add(difficultyInfoLabel, 0);
         form.fillRest();
@@ -358,22 +349,24 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return onPanel(scorePages, Theme.Panel.METAL);
     }
 
-    /** How to play, written on the kit's paper note: goal, controls as key caps, the loot-and-craft loop. */
+    /** How to play, written on the kit's paper note: goal, controls as key caps, the Day/Night survival loop. */
     private JComponent buildHelpPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
 
-        howToArea = Theme.textBlock("Survive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across alternating Scavenge and "
-                + "Horde Raid phases! Venture outside base to hunt zombies and loot Supply Chests, then return to Base Camp before raids hit.",
+        int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.WAVE_SECONDS;
+        howToArea = Theme.textBlock("Survive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
+                + " Day and Night cycles! You start with only a Survival Knife: scavenge Supply Chests and hunt infected in the Wasteland"
+                + " during Daylight, then fall back to Safe Camp before Nightfall.",
                 13, Theme.PAPER_TEXT);
-        form.add(new Theme.PixelLabel("GOAL", 2, Theme.DARK_RED), 0);
+        form.add(new Theme.PixelLabel("SURVIVAL GOAL", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 6);
 
         // each row: what it does, then the keys (sprites from the Hollow Creek UI kit)
         String[][] controls = {
             {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
             {"Grenade", "mouse_right", "g"}, {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"},
-            {"Switch weapon", "mouse_mid", "1to8"}, {"Talk to Base NPCs", "b"},
+            {"Switch weapon (1-7)", "mouse_mid"}, {"Talk to Base NPCs", "b"},
             {"Pause", "p", "esc"}, {"Craft / Build / Heal", "enter"}
         };
         JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 6));
@@ -384,10 +377,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 14);
         form.add(keys, 8);
 
-        form.add(new Theme.PixelLabel("SCAVENGE, BASE NPC & RAIDS", 2, Theme.DARK_RED), 14);
-        form.add(Theme.textBlock("Return inside your Base Camp (green minimap icon) and press B to talk to the Gunsmith, Doctor, "
-                + "and Engineer: craft weapons, upgrade stats, heal wounds, and build Guard Posts, Fortified Walls, a Medical Tent, "
-                + "and a Supply Depot to hold off periodic Horde Raids and Bosses.",
+        form.add(new Theme.PixelLabel("DAYLIGHT, BASE NPC & NIGHTFALL", 2, Theme.DARK_RED), 14);
+        form.add(Theme.textBlock("Loot Scraps, Wood, Ammo, and Kits by day. Return inside Safe Camp (green minimap icon) and press B"
+                + " to talk to the Gunsmith, Doctor, and Engineer: craft your first Pistol and heavier guns (keys 1-7), upgrade stats,"
+                + " heal wounds, and build Guard Posts, Walls, Medical Tents, and Supply Depots to withstand Nightfall and Blood Moons.",
                 13, Theme.PAPER_TEXT), 6);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);
@@ -488,9 +481,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         } else if (source instanceof JRadioButton) {
             showClassInfo();
             AssetLoader.playSound("click");
-        } else if (source == weaponCombo) {
-            showWeaponInfo();
-            AssetLoader.playSound("click");
         } else if (source == mapCombo) {
             showMapInfo();
             AssetLoader.playSound("click");
@@ -538,11 +528,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return GameData.PlayerClass.SCAVENGER;
     }
 
-    private GameData.WeaponType getSelectedWeapon() {
-        Object item = weaponCombo.getSelectedItem();
-        return item instanceof GameData.WeaponType ? (GameData.WeaponType) item : GameData.WeaponType.PISTOL;
-    }
-
     private GameData.MapType getSelectedMap() {
         Object item = mapCombo.getSelectedItem();
         return item instanceof GameData.MapType ? (GameData.MapType) item : GameData.MapType.WASTELAND_HIGHWAY;
@@ -551,30 +536,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private void showClassInfo() {
         classInfoArea.setText(getSelectedClass().description);
         refreshHero();
-    }
-
-    private void showWeaponInfo() {
-        weaponInfoArea.setText(describeWeapon(getSelectedWeapon()));
-        refreshHero();
-    }
-
-    /** Two short lines from GameData.WeaponType: the numbers, then what makes the weapon special. */
-    private static String describeWeapon(GameData.WeaponType w) {
-        String numbers = w.damage + (w.pellets > 1 ? " x" + w.pellets : "") + " damage, "
-                + String.format("%.1f", 1000.0 / w.cooldownMs) + " hits/s";
-        String trait;
-        if (w.melee) {
-            trait = "Melee, no ammo needed";
-        } else if (w.ammoCost == 0) {
-            trait = "Unlimited ammo";
-        } else if (w.pellets > 1) {
-            trait = w.pellets + " pellets per shot";
-        } else if (w.pierce > 0) {
-            trait = "Pierces " + w.pierce + (w.pierce == 1 ? " enemy" : " enemies");
-        } else {
-            trait = "Fast automatic fire";
-        }
-        return numbers + "\n" + trait;
     }
 
     private void showMapInfo() {
@@ -593,8 +554,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     }
 
     private void refreshHero() {
-        if (heroPanel != null && weaponCombo != null && mapCombo != null) {
-            heroPanel.setScene(getMap(getSelectedMap()), getSelectedClass(), getSelectedWeapon());
+        if (heroPanel != null && mapCombo != null) {
+            heroPanel.setScene(getMap(getSelectedMap()), getSelectedClass(), GameData.WeaponType.KNIFE);
         }
     }
 
@@ -609,9 +570,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         boolean doubled = doubleSpawnBox.isSelected();
         difficultyValueLabel.setText(d + " - " + DIFFICULTY_NAMES[d - 1].toUpperCase());
         int zombieHp = (int) Math.round(GameData.MonsterType.ZOMBIE_NORMAL.maxHp * GameData.monsterHpScale(1, d));
-        difficultyInfoLabel.setText("Zombies have " + zombieHp + " HP. "
-                + GameData.spawnBatchSize(1, d, doubled) + " per spawn at wave 1, "
-                + GameData.spawnBatchSize(5, d, doubled) + " at wave 5.");
+        difficultyInfoLabel.setText("Infected HP: " + zombieHp + ". Patrol density: "
+                + GameData.spawnBatchSize(1, d, doubled) + " by Day 1, "
+                + GameData.spawnBatchSize(5, d, doubled) + " by Day 5.");
     }
 
     /** Validates the name; on a problem it explains it under the field and puts the cursor back there. */
@@ -651,7 +612,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         GameData.GameSettings s = new GameData.GameSettings();
         s.playerName = playerName;
         s.playerClass = getSelectedClass();
-        s.startWeapon = getSelectedWeapon();
+        s.startWeapon = GameData.WeaponType.KNIFE;
         s.map = getSelectedMap();
         s.difficulty = difficultySlider.getValue();
         s.volume = volumeSlider.getValue();
@@ -748,7 +709,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
      */
     private static final class ScoreTableModel extends AbstractTableModel {
         private static final long serialVersionUID = 1L;
-        private static final String[] COLUMNS = {"NO.", "PLAYER", "MAP", "#WAVE", "#TIME", "#SCORE"};
+        private static final String[] COLUMNS = {"NO.", "SURVIVOR", "REGION", "#DAYS", "#KILLS", "#TIME"};
         private final transient List<GameData.ScoreEntry> rows = new ArrayList<>();
 
         void setScores(List<GameData.ScoreEntry> scores) {
@@ -780,8 +741,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
                 case 1: return e.name;
                 case 2: return e.map;
                 case 3: return e.wave;
-                case 4: return formatTime(e.seconds);
-                default: return e.score;
+                case 4: return e.kills;
+                default: return formatTime(e.seconds);
             }
         }
     }
@@ -808,24 +769,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
                 setToolTipText(String.valueOf(value));
             }
             return this;
-        }
-    }
-
-    /** Weapon combo entries with their sprite next to the name. */
-    private static final class WeaponRenderer extends Theme.ListRenderer<GameData.WeaponType> {
-        private static final long serialVersionUID = 1L;
-        private final transient Map<GameData.WeaponType, ImageIcon> icons = new EnumMap<>(GameData.WeaponType.class);
-
-        @Override
-        String textFor(GameData.WeaponType w) {
-            ImageIcon icon = icons.get(w);
-            if (icon == null) {
-                icon = new ImageIcon(Theme.fit(AssetLoader.getWeaponIcon(w), 34, 18));
-                icons.put(w, icon);
-            }
-            setIcon(icon);
-            setIconTextGap(10);
-            return w.displayName;
         }
     }
 

@@ -136,7 +136,7 @@ public final class GameData {
      */
     public enum WeaponType {
         //          name              dmg  cdMs  speed pel spread ammo range melee pierce expl blast icon   strip                          frames sound
-        KNIFE("Knife",                 16,  280,  0.0, 1, 110,  0,   30,  true,  99, false, 0, 3, 1, null,                      0, "swing"),
+        KNIFE("Survival Knife",        24,  270,  0.0, 1, 125,  0,   34,  true,  99, false, 0, 3, 1, null,                      0, "swing"),
         AXE("Axe",                     32,  520,  0.0, 1, 150,  0,   36,  true,  99, false, 0, 0, 1, null,                      0, "swing"),
         PISTOL("Pistol",               12,  330,  6.0, 1,   4,  0,  260,  false,  0, false, 0, 1, 0, "weapons/pistol_shoot.png",   5, "shoot_pistol"),
         REVOLVER("Revolver",           30,  520,  7.0, 1,   2,  1,  300,  false,  1, false, 0, 2, 0, "weapons/revolver_shoot.png", 9, "shoot_heavy"),
@@ -211,7 +211,13 @@ public final class GameData {
         }
     }
 
-    /** The six weapons offered in the launcher's "starting weapon" JComboBox. */
+    /** The 7 survival weapons shown on the HUD hotbar (1 melee + 6 craftable firearms). */
+    public static final WeaponType[] HOTBAR_WEAPONS = {
+        WeaponType.KNIFE, WeaponType.PISTOL, WeaponType.REVOLVER,
+        WeaponType.SHOTGUN, WeaponType.RIFLE, WeaponType.SNIPER, WeaponType.ROCKET_LAUNCHER
+    };
+
+    /** Legacy list kept for test harnesses. */
     public static final WeaponType[] START_WEAPONS = {
         WeaponType.KNIFE, WeaponType.AXE, WeaponType.PISTOL, WeaponType.REVOLVER, WeaponType.SHOTGUN, WeaponType.RIFLE
     };
@@ -419,7 +425,7 @@ public final class GameData {
     public static class GameSettings {
         public String playerName = "Survivor";
         public PlayerClass playerClass = PlayerClass.SCAVENGER;
-        public WeaponType startWeapon = WeaponType.PISTOL;
+        public WeaponType startWeapon = WeaponType.KNIFE;
         public MapType map = MapType.WASTELAND_HIGHWAY;
         public int difficulty = 3;                  // 1..5 from JSlider
         public int volume = 70;                     // 0..100 from JSlider
@@ -498,6 +504,9 @@ public final class GameData {
 
     private static List<UpgradeRecipe> createRecipes() {
         List<UpgradeRecipe> list = new ArrayList<>();
+        list.add(new UpgradeRecipe("Craft Pistol", "Reliable 9mm sidearm with unlimited standard rounds.",
+                RecipeKind.WEAPON, 1, WeaponType.PISTOL, WeaponType.KNIFE,
+                ItemType.SCRAPS, 3, ItemType.WOOD, 1));
         list.add(new UpgradeRecipe("Craft Revolver", "Heavy sidearm, hits hard and pierces one enemy.",
                 RecipeKind.WEAPON, 1, WeaponType.REVOLVER, WeaponType.PISTOL,
                 ItemType.SCRAPS, 5, ItemType.WOOD, 2));

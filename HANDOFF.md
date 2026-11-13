@@ -287,21 +287,21 @@ dev-tools/ui-harness/run.sh /tmp/ui-shots
 
 ---
 
-## 11. อัปเดตเพิ่มเติม (2026-11-14) — Scavenge, Base Building, Camp NPCs & Horde Raids
+## 11. อัปเดตเพิ่มเติม (2026-11-14) — Day/Night Survival Mode, Base NPCs & Single Melee Start
 
-ปรับ loop เกมจากการกัน wave อย่างเดียวเป็น **ออกไปยิงซอมบี้/เปิด Supply Chest รอบแผนที่ → กลับมาที่ฐานคุยกับ NPC (`[B]`) เพื่อคราฟต์อาวุธ/อัปเกรด/รักษา/สร้างสิ่งปลูกสร้าง → ป้องกัน Horde Raid เป็นระยะ**:
+ปรับ loop และ UI เกมเป็น **Survival เต็มรูปแบบ** (ตัดความเป็น Arcade แบบ Wave/Score และไม่เลือกปืนเริ่มต้น):
 
-1. **`GameData.java` & `Player.java`**:
-   - เพิ่มสูตรคราฟต์/สร้างฐาน 5 รายการใน `RecipeKind` และ `RECIPES`:
-     - `Build Guard Post` (`BASE_TURRET`, max Lv.4): ตั้งจุดยิง NPC Guard รอบฐาน ยิงซอมบี้ที่เข้าใกล้
-     - `Fortify Base Walls` (`BASE_WALL`, max Lv.3): สร้างแนวป้องกันรอบค่าย และลดความเสียหายที่ได้รับในฐาน (-15%/lv)
-     - `Build Medical Tent` (`BASE_MEDIC`, max Lv.3): ฟื้นเลือดอัตโนมัติและแก้พิษเมื่อยืนอยู่ในฐาน
-     - `Build Supply Depot` (`BASE_FARM`, max Lv.3): แปลงผักและคลังกระสุนที่ฐาน ผลิต `Ammo` / `Food` / `Medkit` ให้เก็บเป็นระยะ
-     - `Doctor Treatment` (`HEAL_NOW`): จ่าย `Food` + `Scraps` เพื่อรักษา +65 HP และแก้พิษทันทีในฐาน
-2. **`GameMap.java` & `Monster.java`**:
-   - `GameMap.applyBaseUpgrades(...)`: วางสิ่งก่อสร้างจริง (กำแพงลังไม้/ยาง/ถังน้ำมัน, NPC Guard, เต็นท์พยาบาล/เตียง, แปลงข้าวโพด/ข้าวสาลี/กล่องเสบียง) ใน/รอบ `campArea` พร้อมคำนวณ walkability และ minimap ใหม่
-   - `Monster`: แยกระหว่าง `raiding` (มอนสเตอร์บุกฐานและบอส) กับมอนสเตอร์รอบนอกที่เดินลาดตระเวน (`wanderOuterZone`) ไม่เดินเข้าฐานช่วง Scavenge และจะไล่ตามเมื่อผู้เล่นเข้าไปในระยะตรวจจับหรือยิงโดน
-3. **`GamePanel.java`, `GameFrame.java`, `UpgradeDialog.java`, `MainApplication.java`**:
-   - สลับช่วง `SCAVENGE` และ `HORDE RAID` ภายในแต่ละรอบ 30 วินาที พร้อมเกิด Supply Chest รอบนอกให้ไปเก็บ
-   - กด `B` / ปุ่ม `BASE NPC` ได้เมื่อเดินกลับมาในเขต `campArea` (นอกเขตจะขึ้นข้อความเตือนให้กลับฐาน)
-   - `UpgradeDialog` เปลี่ยนบทพูด NPC ตามประเภท (Gunsmith / Engineer / Medic / Trainer) และปุ่มคำสั่ง (`CRAFT` / `BUILD` / `HEAL NOW`)
+1. **เริ่มต้นด้วยมีดเล่มเดียว & ระบบคราฟต์ปืน (`GameData.java`, `Player.java`, `GameFrame.java`, `MainApplication.java`)**:
+   - Launcher เอาตัวเลือก `Weapon` ออก (แสดงเพียง `Starting Gear: Survival Knife Only`) ให้ผู้เล่นเลือกเฉพาะสายอาชีพ, ภูมิภาค และ Hazard Level
+   - ผู้เล่นเริ่มเกมด้วย `Survival Knife` (melee, 24 dmg) และ scraps เริ่มต้นเท่านั้น (`HOTBAR_WEAPONS` 7 ช่อง: คีย์ `1-7`)
+   - เพิ่มสูตรแรก `"Craft Pistol"` (`RecipeKind.WEAPON`) ให้กลับมาหา Gunsmith ที่ฐานเพื่อคราฟต์ปืนพกและปืนระดับสูงขึ้น
+2. **วงจร Daylight / Nightfall และแสงเงากลางคืน (`GamePanel.java`)**:
+   - เปลี่ยนจากแนว Wave/Score เป็น **DAY 1-10** สลับช่วง **DAYLIGHT** (ออกไปสำรวจ รูท Supply Chest ล่าซอมบี้รอบนอก) และ **NIGHTFALL** (ความมืดค่อยๆ ปกคลุมแผนที่ เหลือรัศมีไฟฉายรอบผู้เล่น รอบฐาน และ Guard Post ขณะฝูงซอมบี้/Apex Mutant บุกเข้าฐาน)
+   - ย้ายเป้าหมายการรอดชีวิตเป็น `DAY X: DAYLIGHT / NIGHTFALL - SAFE CAMP / WASTELAND` และแสดง `Camp` (`G_ W_ M_ F_`), `Hostiles`, ระยะทาง/เข็มทิศกลับค่าย และจำนวนกล่องรอบนอกใต้มินิแมปแทน Score/Wave
+3. **การสร้างฐานและคุย NPC (`GameData.java`, `GameMap.java`, `Monster.java`, `UpgradeDialog.java`)**:
+   - เพิ่มสูตรสร้างฐาน `Build Guard Post` (`BASE_TURRET`), `Fortify Base Walls` (`BASE_WALL`), `Build Medical Tent` (`BASE_MEDIC`), `Build Supply Depot` (`BASE_FARM`) และ `Doctor Treatment` (`HEAL_NOW`)
+   - `GameMap.applyBaseUpgrades(...)` วางสิ่งก่อสร้างจริงใน/รอบ `campArea` พร้อมคำนวณ walkability และ minimap ใหม่
+   - `Monster`: แยกระหว่าง `raiding` (บุกฐานช่วง Nightfall/Blood Moon) กับมอนสเตอร์ลาดตระเวนรอบนอก (`wanderOuterZone`)
+   - กด `B` หรือปุ่ม `BASE NPC` ได้เมื่อกลับเข้าเขต `Safe Camp` (`isPlayerInBase()`) โดย `UpgradeDialog` เปลี่ยนบทพูด NPC (Gunsmith / Engineer / Medic / Trainer) และข้อความปุ่มตามรายการที่เลือก
+4. **ตารางคะแนนฝั่ง Survival (`MainApplication.java`, `GameFrame.java`)**:
+   - ตาราง High Score และหน้าสรุปผลตอนจบเกมแสดงข้อมูล Survival (`NO.`, `SURVIVOR`, `REGION`, `#DAYS`, `#KILLS`, `#TIME`) และเก็บเมธอดภายในที่ `HeadlessSim` เรียกใช้งานไว้ครบถ้วน

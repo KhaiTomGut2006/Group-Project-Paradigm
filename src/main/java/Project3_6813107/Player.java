@@ -73,7 +73,6 @@ public final class Player extends Entity {
         super(startX, startY, 12, 20, GameData.PLAYER_BASE_HP, GameData.PLAYER_BASE_SPEED);
         this.settings = settings == null ? new GameData.GameSettings() : settings;
         this.playerClass = this.settings.playerClass == null ? GameData.PlayerClass.SCAVENGER : this.settings.playerClass;
-        GameData.WeaponType start = this.settings.startWeapon == null ? GameData.WeaponType.PISTOL : this.settings.startWeapon;
         for (GameData.ItemType t : GameData.ItemType.values()) {
             inventory.put(t, 0);
         }
@@ -83,10 +82,9 @@ public final class Player extends Entity {
         inventory.put(GameData.ItemType.AMMO, GameData.PLAYER_START_AMMO + playerClass.bonusAmmo);
         inventory.put(GameData.ItemType.MEDKIT, playerClass.startMedkits);
         inventory.put(GameData.ItemType.GRENADE, playerClass.startGrenades);
-        inventory.put(GameData.ItemType.SCRAPS, playerClass.startScraps);
-        ownedWeapons.add(GameData.WeaponType.PISTOL);   // the sidearm with infinite ammo is always there
-        ownedWeapons.add(start);
-        currentWeapon = start;
+        inventory.put(GameData.ItemType.SCRAPS, 2 + playerClass.startScraps);
+        ownedWeapons.add(GameData.WeaponType.KNIFE);
+        currentWeapon = GameData.WeaponType.KNIFE;
         maxHp = GameData.PLAYER_BASE_HP + playerClass.bonusMaxHp;
         hp = maxHp;
         aimX = startX + 50;
@@ -211,7 +209,8 @@ public final class Player extends Entity {
     }
 
     private void fallBackFromEmptyWeapon() {
-        GameData.WeaponType fallback = GameData.WeaponType.PISTOL;
+        GameData.WeaponType fallback = ownedWeapons.contains(GameData.WeaponType.PISTOL)
+                ? GameData.WeaponType.PISTOL : GameData.WeaponType.KNIFE;
         currentWeapon = fallback;
         flickerTick = FLICKER_TICKS;
         showHint("Out of ammo - switched to " + fallback.displayName);

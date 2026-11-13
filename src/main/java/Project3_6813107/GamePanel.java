@@ -110,9 +110,11 @@ public final class GamePanel extends JPanel
     private volatile int wave = 1;
     private volatile int kills;
     private volatile int killScore;
-    private int bossTimer;                     // > 0: a boss walks in when it reaches 0
+    private int bossTimer;                     // > 0: an apex mutant walks in when it reaches 0
     private int gameOverTimer;
     private boolean raidActive;
+    private float nightAlpha;                  // 0 = daylight, 1 = nightfall
+    private transient BufferedImage nightMask; // world-scale darkness layer punched with light pools
     private transient volatile Banner banner;
 
     // ------------------------------------------------------------------ input (set on the Swing thread, read by the game thread)
@@ -218,7 +220,7 @@ public final class GamePanel extends JPanel
         updateCamera(1.0);   // start centred on the player
         preloadSprites();
         spawnInitialScavengeWorld();
-        showBanner("SCAVENGE & FORTIFY", "Loot outer zones, press B at camp to build & heal", BANNER_WAVE);
+        showBanner("DAY 1 - DAWN", "Knife equipped: scavenge outside & build camp [B]", BANNER_WAVE);
     }
 
     /** Populates outer map zones with roaming zombies and supply chests right at run start. */
@@ -429,6 +431,11 @@ public final class GamePanel extends JPanel
         if (!raidActive && secInWave >= raidStartSec) {
             startRaidPhase();
         }
+        if (raidActive) {
+            nightAlpha = Math.min(1f, nightAlpha + 0.012f);
+        } else {
+            nightAlpha = Math.max(0f, nightAlpha - 0.015f);
+        }
         if (bossTimer > 0 && --bossTimer == 0) {
             spawnBoss();
         }
@@ -440,19 +447,19 @@ public final class GamePanel extends JPanel
         spawnOuterSupplyChests(2);
         AssetLoader.playSound("wave");
         if (number % GameData.BOSS_EVERY_WAVES == 0) {
-            showBanner("WAVE " + number, "Scavenge fast - Boss & Raid approaching!", BANNER_BOSS);
+            showBanner("DAY " + number + " - BLOOD MOON", "Warning: an Apex Mutant is tracking your camp!", BANNER_BOSS);
             bossTimer = BOSS_WARNING_TICKS;
         } else if (number == GameData.TIME_LIMIT_SECONDS / GameData.WAVE_SECONDS) {
-            showBanner("FINAL WAVE", "Hold the base for 30 more seconds!", BANNER_WAVE);
+            showBanner("FINAL DAY " + number, "Hold out until extraction arrives!", BANNER_WAVE);
         } else {
-            showBanner("WAVE " + number, "Scavenge outer zones or fortify base [B]", BANNER_WAVE);
+            showBanner("DAY " + number + " - DAWN", "Daylight: scavenge outer zones & fortify camp [B]", BANNER_WAVE);
         }
     }
 
     private void startRaidPhase() {
         raidActive = true;
         AssetLoader.playSound("wave");
-        showBanner("HORDE RAID", "Return to base and hold the perimeter!", BANNER_BOSS);
+        showBanner("NIGHTFALL", "Darkness falls - the infected march on your camp!", BANNER_BOSS);
         for (Monster m : monsters) {
             if (m.isAlive()) {
                 m.setRaiding(true);
@@ -571,7 +578,7 @@ public final class GamePanel extends JPanel
     private void spawnBoss() {
         spawnMonster(GameData.MonsterType.ZOMBIE_BOSS);
         AssetLoader.playSound("boss_roar");
-        showBanner("BRUTE BOSS", "has entered the arena", BANNER_BOSS);
+        showBanner("APEX MUTANT", "A giant mutant has breached the perimeter!", BANNER_BOSS);
         shake(5, 30);
     }
 
@@ -603,11 +610,13 @@ public final class GamePanel extends JPanel
         int slot = weaponSlotRequested;
         if (slot >= 0) {
             weaponSlotRequested = -1;
-            GameData.WeaponType w = GameData.WeaponType.values()[slot];
-            if (player.ownsWeapon(w)) {
-                player.switchWeapon(w);
-            } else {
-                player.showHint("You do not have the " + w.displayName + " yet");
+            if (slot < GameData.HOTBAR_WEAPONS.length) {
+                GameData.WeaponType w = GameData.HOTBAR_WEAPONS[slot];
+                if (player.ownsWeapon(w)) {
+                    player.switchWeapon(w);
+                } else {
+                    player.showHint("Craft the " + w.displayName + " at Base Camp [B]");
+                }
             }
         }
         int cycle = weaponCycleRequested;
@@ -904,6 +913,46 @@ public final class GamePanel extends JPanel
 
     public int getWave() {
         return wave;
+    }
+
+    public int getDay() {
+        return wave;
+    }
+
+    public boolean isNight() {
+        return raidActive;
+    }
+
+    public int getOuterChestCount() {
+        int n = 0;
+        for (DroppedItem d : drops) {
+            if (d.getType() == GameData.ItemType.CHEST) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    public int getDistanceFromCampMeters() {
+        Rectangle camp = map.getCampArea();
+        return (int) Math.round(Math.hypot(player.getX() - camp.getCenterX(), player.getY() - camp.getCenterY()) / 12.0);
+    }
+
+    public String getCompassDirectionToCamp() {
+        Rectangle camp = map.getCampArea();
+        double dx = camp.getCenterX() - player.getX();
+        double dy = camp.getCenterY() - player.getY();
+        String ns = Math.abs(dy) < 24 ? "" : (dy < 0 ? "N" : "S");
+        String ew = Math.abs(dx) < 24 ? "" : (dx < 0 ? "W" : "E");
+        String dir = ns + ew;
+        return dir.isEmpty() ? "HERE" : dir;
+    }
+
+    public int getTotalBaseLevel() {
+        return player.getLevel(GameData.RecipeKind.BASE_TURRET)
+                + player.getLevel(GameData.RecipeKind.BASE_WALL)
+                + player.getLevel(GameData.RecipeKind.BASE_MEDIC)
+                + player.getLevel(GameData.RecipeKind.BASE_FARM);
     }
 
     public int getKills() {
@@ -1282,6 +1331,7 @@ public final class GamePanel extends JPanel
 
     /** Everything that sits on the glass in front of the world. */
     private void drawOverlay(Graphics2D g2) {
+        drawNightLighting(g2);
         drawDangerTint(g2);
         drawBanner(g2);
         drawMiniMap(g2);
@@ -1296,6 +1346,41 @@ public final class GamePanel extends JPanel
         } else if (mouseInside) {
             drawCrosshair(g2);
         }
+    }
+
+    /** Atmospheric Nightfall darkness with warm light pools around the player, campfire, and guard posts. */
+    private void drawNightLighting(Graphics2D g2) {
+        if (nightAlpha <= 0.01f) {
+            return;
+        }
+        int vw = getViewWidth(), vh = getViewHeight();
+        int mw = vw / SCALE + 2, mh = vh / SCALE + 2;
+        if (nightMask == null || nightMask.getWidth() != mw || nightMask.getHeight() != mh) {
+            nightMask = new BufferedImage(mw, mh, BufferedImage.TYPE_INT_ARGB);
+        }
+        Graphics2D mg = nightMask.createGraphics();
+        mg.setComposite(AlphaComposite.Src);
+        mg.setColor(new Color(8, 12, 26, Math.round(nightAlpha * 165)));
+        mg.fillRect(0, 0, mw, mh);
+
+        mg.setComposite(AlphaComposite.DstOut);
+        punchLightPool(mg, (float) (player.getX() - camX), (float) (player.getY() - camY), 90f);
+        Rectangle camp = map.getCampArea();
+        punchLightPool(mg, (float) (camp.getCenterX() - camX), (float) (camp.getCenterY() - camY), 130f);
+        for (Point gp : map.getGuardPosts()) {
+            punchLightPool(mg, (float) (gp.x - camX), (float) (gp.y - camY), 68f);
+        }
+        mg.dispose();
+        g2.drawImage(nightMask, 0, 0, vw, vh, null);
+    }
+
+    private static void punchLightPool(Graphics2D mg, float cx, float cy, float radius) {
+        if (cx + radius < 0 || cy + radius < 0 || cx - radius > 1200 || cy - radius > 900) {
+            return;
+        }
+        mg.setPaint(new RadialGradientPaint(cx, cy, radius, new float[]{0f, 0.55f, 1f},
+                new Color[]{new Color(0, 0, 0, 255), new Color(0, 0, 0, 150), new Color(0, 0, 0, 0)}));
+        mg.fillOval(Math.round(cx - radius), Math.round(cy - radius), Math.round(radius * 2), Math.round(radius * 2));
     }
 
     /** Red flash when hurt, green tint when poisoned, pulsing red edge when health is low. */
@@ -1396,6 +1481,17 @@ public final class GamePanel extends JPanel
                 (int) (getViewWidth() / (double) SCALE * perPx), (int) (getViewHeight() / (double) SCALE * perPx));
         drawMarker(g, "map_marker_player", left + (int) (player.getX() * perPx), top + (int) (player.getY() * perPx));
         Theme.drawMinimapFrame(g, left - 6, top - 6, w + 12, h + 12, 2);
+
+        // Survival telemetry & compass box right beneath the minimap
+        int boxY = top + h + 10;
+        Theme.paintPanel(g, Theme.Panel.GLASS, left - 6, boxY, w + 12, 42, 1);
+        String zoneText = isPlayerInBase()
+                ? "ZONE: SAFE CAMP"
+                : "CAMP: " + getDistanceFromCampMeters() + "M " + getCompassDirectionToCamp();
+        Theme.drawPixelTextShadow(g, zoneText, left + 2, boxY + 8, 2,
+                isPlayerInBase() ? new Color(0x88D470) : Theme.GOLD);
+        String intel = "CHESTS " + getOuterChestCount() + "  BASE LV " + getTotalBaseLevel();
+        Theme.drawPixelTextShadow(g, intel, left + 2, boxY + 24, 2, Theme.TEXT_2);
         g.dispose();
     }
 
@@ -1418,19 +1514,8 @@ public final class GamePanel extends JPanel
         Graphics2D g = (Graphics2D) g2.create();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, alpha)));
         int cx = getViewWidth() / 2, top = getViewHeight() / 5;
-        if (b.title.startsWith("WAVE ")) {
-            // the kit's "WAVE" title with the number written next to it in the pixel font
-            BufferedImage word = Theme.kit("titles/wave", 2);
-            String number = b.title.substring(5);
-            int numW = Theme.pixelWidth(number, 8);
-            int x = cx - (word.getWidth() + 14 + numW) / 2;
-            g.drawImage(word, x, top, null);
-            Theme.drawPixelTextShadow(g, number, x + word.getWidth() + 14, top, 8, b.color);
-            top += word.getHeight();
-        } else {
-            Theme.drawPixelTextShadow(g, b.title, cx - Theme.pixelWidth(b.title, 7) / 2, top, 7, b.color);
-            top += 35;
-        }
+        Theme.drawPixelTextShadow(g, b.title, cx - Theme.pixelWidth(b.title, 6) / 2, top, 6, b.color);
+        top += 34;
         Theme.drawBanner(g, b.subtitle.toUpperCase(), cx, top + 12, 2);
         g.dispose();
     }
@@ -1481,7 +1566,7 @@ public final class GamePanel extends JPanel
         String[][] controls = {
             {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
             {"Grenade", "mouse_right", "g"}, {"Medkit", "e"},
-            {"Switch weapon", "mouse_mid", "1to8"}, {"Workshop", "b"},
+            {"Switch weapon (1-7)", "mouse_mid"}, {"Base NPC", "b"},
             {"Resume", "p", "esc"}
         };
         BufferedImage title = Theme.kit("titles/paused", 2);
@@ -1516,7 +1601,7 @@ public final class GamePanel extends JPanel
         g2.fillRect(0, 0, w, h);
         BufferedImage title = Theme.kit(won ? "titles/survived" : "titles/you_died", 3);
         g2.drawImage(title, (w - title.getWidth()) / 2, h / 2 - title.getHeight() - 10, null);
-        String stats = "SCORE " + getScore() + "   KILLS " + kills + "   WAVE " + wave + "   " + formatTime(getElapsedSeconds());
+        String stats = "DAY " + wave + "   INFECTED KILLED " + kills + "   BASE LV " + getTotalBaseLevel() + "   TIME " + formatTime(getElapsedSeconds());
         Theme.drawPixelTextShadow(g2, stats, (w - Theme.pixelWidth(stats, 3)) / 2, h / 2 + 16, 3, Theme.TEXT);
     }
 }
