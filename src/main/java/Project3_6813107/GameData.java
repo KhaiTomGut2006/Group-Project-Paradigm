@@ -55,9 +55,11 @@ public final class GameData {
     public static final int POISON_TICK_DAMAGE = 2;         // damage per poison pulse from toxic spit
     public static final int POISON_PULSE_MS = 500;
 
-    // Run / wave rules (used by GamePanel)
+    // Run / day-night survival rules (used by GamePanel)
     public static final int TIME_LIMIT_SECONDS = 300;       // survive 5:00 to win
-    public static final int WAVE_SECONDS = 30;              // the wave number goes up every 30 s
+    public static final int WAVE_SECONDS = 30;              // internal wave difficulty step every 30 s
+    public static final int DAY_CYCLE_SECONDS = 100;        // 3 full Day/Night cycles across the 300 s survival run
+    public static final int DAYLIGHT_SECONDS = 62;          // 62 s Daylight scavenging + 38 s Nightfall raid per day
     public static final int BOSS_EVERY_WAVES = 3;           // a boss arrives on wave 3, 6, 9 ...
     public static final int MAX_LIVE_MONSTERS = 120;        // cap so the frame rate holds
     public static final int ITEM_LIFETIME_SECONDS = 45;     // dropped loot disappears after this
@@ -67,10 +69,13 @@ public final class GameData {
         return (0.55 + 0.15 * difficulty) * (1.0 + 0.12 * Math.max(0, wave - 1));
     }
 
-    /** How many monsters one spawner wake-up adds: grows with the wave and difficulty, doubled by Double Spawn. */
+    /** How many monsters one spawner wake-up adds: balanced small groups by default, doubled stress-test for doubleSpawn. */
     public static int spawnBatchSize(int wave, int difficulty, boolean doubleSpawn) {
-        int n = 2 + wave + (difficulty - 1) / 2;
-        return Math.min(14, doubleSpawn ? n * 2 : n);
+        if (doubleSpawn) {
+            int n = 2 + wave + (difficulty - 1) / 2;
+            return Math.min(14, n * 2);
+        }
+        return Math.min(5, 1 + (wave - 1) / 3 + difficulty / 2);
     }
 
     /** Converts milliseconds to whole simulation ticks (at least 1). */
@@ -534,7 +539,7 @@ public final class GameData {
                 RecipeKind.ARMOR, 5, null, null, ItemType.STEEL, 2, ItemType.ARMOR_VEST, 1));
         list.add(new UpgradeRecipe("Upgrade Loot Magnet", "+25% item pickup radius.",
                 RecipeKind.MAGNET, 4, null, null, ItemType.ELECTRONICS, 2, ItemType.BATTERY, 1));
-        list.add(new UpgradeRecipe("Build Guard Post", "Station an armed NPC guard at base perimeter to shoot zombies.",
+        list.add(new UpgradeRecipe("Recruit NPC Ally", "Recruit an armed NPC survivor who follows you and fights zombies (+1 mobile NPC & camp guard).",
                 RecipeKind.BASE_TURRET, 4, null, null, ItemType.SCRAPS, 4, ItemType.WOOD, 3, ItemType.STEEL, 1));
         list.add(new UpgradeRecipe("Fortify Base Walls", "Build camp barricades and reduce damage inside base (-15%/lv).",
                 RecipeKind.BASE_WALL, 3, null, null, ItemType.WOOD, 4, ItemType.SCRAPS, 3, ItemType.STEEL, 1));

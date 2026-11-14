@@ -354,10 +354,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
 
-        int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.WAVE_SECONDS;
+        int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.DAY_CYCLE_SECONDS;
         howToArea = Theme.textBlock("Survive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
-                + " Day and Night cycles! You start with only a Survival Knife: scavenge Supply Chests and hunt infected in the Wasteland"
-                + " during Daylight, then fall back to Safe Camp before Nightfall.",
+                + " Day and Night cycles! You start with a Survival Knife and an armed NPC Ally: scavenge Supply Chests during"
+                + " each " + GameData.DAYLIGHT_SECONDS + "s Daylight, recruit extra NPCs & fortify Safe Camp [B] before Nightfall.",
                 13, Theme.PAPER_TEXT);
         form.add(new Theme.PixelLabel("SURVIVAL GOAL", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 6);

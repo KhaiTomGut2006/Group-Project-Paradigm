@@ -92,6 +92,7 @@ public final class GamePanel extends JPanel
     private final transient List<Monster> monsters = new CopyOnWriteArrayList<>();
     private final transient List<Bullet> bullets = new CopyOnWriteArrayList<>();
     private final transient List<DroppedItem> drops = new CopyOnWriteArrayList<>();
+    private final transient List<AllyNpc> allies = new CopyOnWriteArrayList<>();
     private final transient List<Effect> effects = new CopyOnWriteArrayList<>();
     private final transient Object worldLock = new Object();
     private final Random rng = new Random();   // used by the game thread only
@@ -108,6 +109,7 @@ public final class GamePanel extends JPanel
     private volatile int tickCount;            // every update step, also after game over (animations)
     private volatile int elapsedTicks;         // survival time; stops while the player dies
     private volatile int wave = 1;
+    private volatile int currentDay = 1;
     private volatile int kills;
     private volatile int killScore;
     private int bossTimer;                     // > 0: an apex mutant walks in when it reaches 0
@@ -115,6 +117,8 @@ public final class GamePanel extends JPanel
     private boolean raidActive;
     private float nightAlpha;                  // 0 = daylight, 1 = nightfall
     private transient BufferedImage nightMask; // world-scale darkness layer punched with light pools
+    private int idlePlayerTicks;
+    private double lastPlayerX, lastPlayerY;
     private transient volatile Banner banner;
 
     // ------------------------------------------------------------------ input (set on the Swing thread, read by the game thread)
@@ -182,6 +186,130 @@ public final class GamePanel extends JPanel
         }
     }
 
+    /** Armed NPC survivor who accompanies the player, keeps formation, and shoots nearby zombies. */
+    private final class AllyNpc implements GameMap.Drawable {
+        final int slot;
+        double x, y;
+        double aimAngle;
+        boolean facingLeft;
+        boolean moving;
+        int animTick;
+        int fireCooldown;
+
+        AllyNpc(int slot, double x, double y) {
+            this.slot = slot;
+            this.x = x;
+            this.y = y;
+        }
+
+        void update(int squadLv, boolean allowFire) {
+            animTick++;
+            if (fireCooldown > 0) {
+                fireCooldown--;
+            }
+            double distToPlayer = Math.hypot(player.getX() - x, player.getY() - y);
+            if (distToPlayer > 250) {
+                x = player.getX();
+                y = player.getY();
+                moving = false;
+            } else {
+                double formAngle = slot * (Math.PI / 2.0) + 0.75;
+                double formDist = 38.0 + (slot % 2) * 14.0;
+                double goalX = player.getX() + Math.cos(formAngle) * formDist;
+                double goalY = player.getY() + Math.sin(formAngle) * formDist;
+                double d = Math.hypot(goalX - x, goalY - y);
+                if (d > 10) {
+                    double step = player.getMoveSpeed() * 1.05;
+                    double moveAngle = map.getChaseAngle(x, y + 8, goalX, goalY + 8, 14);
+                    double dx = Math.cos(moveAngle) * Math.min(step, d);
+                    double dy = Math.sin(moveAngle) * Math.min(step, d);
+                    double oldX = x, oldY = y;
+                    if (dx != 0 && !map.isBlocked(new Rectangle((int) Math.round(x + dx) - 7, (int) Math.round(y), 14, 12))) {
+                        x += dx;
+                    }
+                    if (dy != 0 && !map.isBlocked(new Rectangle((int) Math.round(x) - 7, (int) Math.round(y + dy), 14, 12))) {
+                        y += dy;
+                    }
+                    moving = Math.hypot(x - oldX, y - oldY) > 0.1;
+                    facingLeft = dx < -0.05 || (Math.abs(dx) <= 0.05 && facingLeft);
+                } else {
+                    moving = false;
+                }
+            }
+
+            if (allowFire && player.isAlive()) {
+                Monster best = null;
+                double bestDist = 185.0;
+                for (Monster m : monsters) {
+                    if (!m.isAlive()) {
+                        continue;
+                    }
+                    double d = Math.hypot(m.getX() - x, m.getY() - y);
+                    if (d < bestDist && map.hasClearPath(x, y, m.getX(), m.getY(), 4)) {
+                        bestDist = d;
+                        best = m;
+                    }
+                }
+                if (best != null) {
+                    aimAngle = Math.atan2(best.getY() - y, best.getX() - x);
+                    facingLeft = Math.cos(aimAngle) < 0;
+                    if (fireCooldown <= 0 && bullets.size() < 320) {
+                        GameData.WeaponType w = (slot == 0 && squadLv == 0)
+                                ? GameData.WeaponType.PISTOL : GameData.WeaponType.RIFLE;
+                        Bullet b = Bullet.shot(x + Math.cos(aimAngle) * 10, y + Math.sin(aimAngle) * 10,
+                                aimAngle, w, 11 + squadLv * 3);
+                        b.setMap(map);
+                        bullets.add(b);
+                        addEffect(new Effect(Effect.Kind.IMPACT,
+                                x + Math.cos(aimAngle) * 12, y + Math.sin(aimAngle) * 12, 10, null, null, 12));
+                        fireCooldown = Math.max(14, 26 - squadLv * 2);
+                    }
+                } else if (!moving) {
+                    aimAngle = facingLeft ? Math.PI : 0;
+                }
+            }
+        }
+
+        @Override
+        public double getSortY() {
+            return y + 10;
+        }
+
+        @Override
+        public void draw(Graphics2D g2) {
+            g2.setColor(new Color(0, 0, 0, 55));
+            g2.fillOval((int) Math.round(x - 7), (int) Math.round(y + 8), 14, 5);
+            g2.setColor(new Color(100, 225, 115, 125));
+            g2.setStroke(new BasicStroke(1f));
+            g2.drawOval((int) Math.round(x - 8), (int) Math.round(y + 7), 16, 6);
+
+            String strip = slot % 2 == 0 ? "characters/npc2_idle.png" : "characters/npc_idle.png";
+            BufferedImage[] frames = AssetLoader.loadStrip(strip, 6);
+            BufferedImage frame = frames[(animTick / 8) % frames.length];
+            int bob = moving && (animTick / 4) % 2 == 1 ? -1 : 0;
+            int w = frame.getWidth(), h = frame.getHeight();
+            int left = (int) Math.round(x - w / 2.0);
+            int top = (int) Math.round(y + 19 - h) + bob;
+            if (facingLeft) {
+                g2.drawImage(frame, left + w, top, -w, h, null);
+            } else {
+                g2.drawImage(frame, left, top, w, h, null);
+            }
+
+            GameData.WeaponType weapon = slot == 0 && player.getLevel(GameData.RecipeKind.BASE_TURRET) == 0
+                    ? GameData.WeaponType.PISTOL : GameData.WeaponType.RIFLE;
+            BufferedImage gunImg = AssetLoader.loadStrip(weapon.flickerStrip(), 7)[6];
+            AffineTransform old = g2.getTransform();
+            g2.translate(x + (facingLeft ? -4 : 4), y + 7 + bob);
+            g2.rotate(aimAngle);
+            if (Math.cos(aimAngle) < 0) {
+                g2.scale(1, -1);
+            }
+            g2.drawImage(gunImg, -12, -17, null);
+            g2.setTransform(old);
+        }
+    }
+
     // ------------------------------------------------------------------ construction
     public GamePanel(GameData.GameSettings settings, GameFrame frame) {
         this.settings = settings == null ? new GameData.GameSettings() : settings;
@@ -220,23 +348,26 @@ public final class GamePanel extends JPanel
         updateCamera(1.0);   // start centred on the player
         preloadSprites();
         spawnInitialScavengeWorld();
-        showBanner("DAY 1 - DAWN", "Knife equipped: scavenge outside & build camp [B]", BANNER_WAVE);
+        showBanner("DAY 1 - DAWN", "62s Daylight: scavenge with your NPC ally & build camp [B]", BANNER_WAVE);
     }
 
-    /** Populates outer map zones with roaming zombies and supply chests right at run start. */
+    /** Populates outer map zones with roaming zombies, supply chests, and 1 starting NPC companion. */
     private void spawnInitialScavengeWorld() {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             Point p = map.randomOuterLootPoint(rng);
             DroppedItem chest = new DroppedItem(GameData.ItemType.CHEST, 1, p.x, p.y, player);
             chest.setMap(map);
             drops.add(chest);
         }
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 4; i++) {
             Point p = map.randomOuterLootPoint(rng);
             Monster m = new Monster(GameData.MonsterType.ZOMBIE_NORMAL, p.x, p.y, map, player, GameData.monsterHpScale(1, getDifficulty()));
             m.setRaiding(false);
             monsters.add(m);
         }
+        allies.add(new AllyNpc(0, player.getX() - 26, player.getY() + 12));
+        lastPlayerX = player.getX();
+        lastPlayerY = player.getY();
     }
 
     /**
@@ -250,6 +381,8 @@ public final class GamePanel extends JPanel
             AssetLoader.loadStrip(t.deathStrip(), 8);
         }
         AssetLoader.loadStrip("characters/bandit_idle.png", 6);
+        AssetLoader.loadStrip("characters/npc_idle.png", 6);
+        AssetLoader.loadStrip("characters/npc2_idle.png", 6);
         for (GameData.WeaponType w : GameData.WeaponType.values()) {
             AssetLoader.loadStrip(w.flickerStrip(), 7);
             if (w.shootStrip != null) {
@@ -313,12 +446,13 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** The second thread: wakes every 2-3 seconds and asks for a batch of monsters. */
+    /** The second thread: wakes periodically and asks for a batch of monsters. */
     private void runWaveSpawner() {
         Random timing = new Random();
         while (running) {
             try {
-                Thread.sleep(2000 + timing.nextInt(1001));
+                int delay = raidActive ? (2200 + timing.nextInt(901)) : (3200 + timing.nextInt(1101));
+                Thread.sleep(delay);
             } catch (InterruptedException ex) {
                 return;   // stopGame() interrupts us
             }
@@ -412,7 +546,7 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Survival time, wave changes, Scavenge/Raid phase transitions, boss timer and win. */
+    /** Survival time, 3-Day Day/Night transitions, boss timer and win. */
     private void updateClock() {
         if (!player.isAlive()) {
             return;   // the clock stops while the death animation plays
@@ -424,45 +558,52 @@ public final class GamePanel extends JPanel
         }
         int newWave = 1 + elapsedTicks / WAVE_TICKS;
         if (newWave != wave) {
-            startWave(newWave);
+            wave = newWave;
         }
-        int secInWave = getElapsedSeconds() % GameData.WAVE_SECONDS;
-        int raidStartSec = wave == 1 ? 16 : 14;
-        if (!raidActive && secInWave >= raidStartSec) {
+        int elapsedSec = getElapsedSeconds();
+        int newDay = 1 + Math.min(2, elapsedSec / GameData.DAY_CYCLE_SECONDS);
+        if (newDay != currentDay) {
+            startDay(newDay);
+        }
+        int secInDay = elapsedSec % GameData.DAY_CYCLE_SECONDS;
+        if (!raidActive && secInDay >= GameData.DAYLIGHT_SECONDS) {
             startRaidPhase();
         }
         if (raidActive) {
-            nightAlpha = Math.min(1f, nightAlpha + 0.012f);
+            nightAlpha = Math.min(1f, nightAlpha + 0.005f);
         } else {
-            nightAlpha = Math.max(0f, nightAlpha - 0.015f);
+            nightAlpha = Math.max(0f, nightAlpha - 0.006f);
         }
         if (bossTimer > 0 && --bossTimer == 0) {
             spawnBoss();
         }
     }
 
-    private void startWave(int number) {
-        wave = number;
+    private void startDay(int dayNumber) {
+        currentDay = dayNumber;
         raidActive = false;
-        spawnOuterSupplyChests(2);
+        spawnOuterSupplyChests(3);
         AssetLoader.playSound("wave");
-        if (number % GameData.BOSS_EVERY_WAVES == 0) {
-            showBanner("DAY " + number + " - BLOOD MOON", "Warning: an Apex Mutant is tracking your camp!", BANNER_BOSS);
-            bossTimer = BOSS_WARNING_TICKS;
-        } else if (number == GameData.TIME_LIMIT_SECONDS / GameData.WAVE_SECONDS) {
-            showBanner("FINAL DAY " + number, "Hold out until extraction arrives!", BANNER_WAVE);
+        if (dayNumber >= 3) {
+            showBanner("FINAL DAY " + dayNumber + " - DAWN", "Last Daylight: prepare your camp & squad for the final night!", BANNER_WAVE);
         } else {
-            showBanner("DAY " + number + " - DAWN", "Daylight: scavenge outer zones & fortify camp [B]", BANNER_WAVE);
+            showBanner("DAY " + dayNumber + " - DAWN", "Daylight (62s): scavenge chests & upgrade at camp [B]", BANNER_WAVE);
         }
     }
 
     private void startRaidPhase() {
         raidActive = true;
+        bossTimer = BOSS_WARNING_TICKS;
         AssetLoader.playSound("wave");
-        showBanner("NIGHTFALL", "Darkness falls - the infected march on your camp!", BANNER_BOSS);
+        showBanner("DAY " + currentDay + " - NIGHTFALL", "Night raid & Apex Mutant incoming - hold out for 38s!", BANNER_BOSS);
+        int raiders = 0;
+        int limit = 5 + currentDay * 3;
         for (Monster m : monsters) {
             if (m.isAlive()) {
                 m.setRaiding(true);
+                if (++raiders >= limit) {
+                    break;
+                }
             }
         }
     }
@@ -483,7 +624,7 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Active camp defenses & facilities: guard posts, medical tent regen, and supply depot production. */
+    /** Active camp defenses & facilities: mobile NPC allies, guard posts, medical tent regen, and supply depot. */
     private void updateBaseSystems() {
         int turretLv = player.getLevel(GameData.RecipeKind.BASE_TURRET);
         int wallLv = player.getLevel(GameData.RecipeKind.BASE_WALL);
@@ -492,6 +633,23 @@ public final class GamePanel extends JPanel
         if (map.applyBaseUpgrades(turretLv, wallLv, medicLv, farmLv)) {
             solidRects.clear();
             solidRects.addAll(map.getSolidRects());
+        }
+
+        if (Math.hypot(player.getX() - lastPlayerX, player.getY() - lastPlayerY) > 0.5 || mouseFiring || autoFire) {
+            idlePlayerTicks = 0;
+        } else {
+            idlePlayerTicks++;
+        }
+        lastPlayerX = player.getX();
+        lastPlayerY = player.getY();
+
+        int desiredAllies = Math.min(5, 1 + turretLv);
+        while (allies.size() < desiredAllies) {
+            allies.add(new AllyNpc(allies.size(), player.getX(), player.getY()));
+        }
+        boolean allowNpcFire = frame != null || idlePlayerTicks < 180;
+        for (AllyNpc a : allies) {
+            a.update(turretLv, allowNpcFire);
         }
 
         if (turretLv > 0 && tickCount % Math.max(12, 32 - turretLv * 5) == 0 && bullets.size() < 320) {
@@ -552,7 +710,10 @@ public final class GamePanel extends JPanel
 
     // ------------------------------------------------------------------ spawning
     private void spawnPendingMonsters() {
-        int room = GameData.MAX_LIVE_MONSTERS - getLiveMonsterCount();
+        int maxAllowed = settings.doubleSpawn
+                ? GameData.MAX_LIVE_MONSTERS
+                : (raidActive ? (18 + currentDay * 5 + getDifficulty() * 3) : (12 + currentDay * 4 + getDifficulty() * 2));
+        int room = maxAllowed - getLiveMonsterCount();
         if (room <= 0) {
             pendingSpawns.set(0);   // the arena is full: forget extra requests so they do not pour in later
             return;
@@ -567,7 +728,7 @@ public final class GamePanel extends JPanel
     /** New monsters appear outside camera view during raids, or in outer zones during scavenge phase. */
     private Monster spawnMonster(GameData.MonsterType type) {
         boolean boss = type == GameData.MonsterType.ZOMBIE_BOSS;
-        boolean raid = raidActive || boss;
+        boolean raid = raidActive || boss || rng.nextInt(3) == 0;
         Point p = raid ? map.randomSpawnPoint(rng, getCameraView()) : map.randomOuterLootPoint(rng);
         Monster m = new Monster(type, p.x, p.y, map, player, GameData.monsterHpScale(wave, getDifficulty()));
         m.setRaiding(raid);
@@ -858,7 +1019,7 @@ public final class GamePanel extends JPanel
     }
 
     private void showBanner(String title, String subtitle, Color color) {
-        banner = new Banner(title, subtitle, color, tickCount, 180);
+        banner = new Banner(title, subtitle, color, tickCount, 115);
     }
 
     /**
@@ -916,11 +1077,29 @@ public final class GamePanel extends JPanel
     }
 
     public int getDay() {
-        return wave;
+        return currentDay;
     }
 
     public boolean isNight() {
         return raidActive;
+    }
+
+    public int getPhaseSecondsRemaining() {
+        int secInDay = getElapsedSeconds() % GameData.DAY_CYCLE_SECONDS;
+        return raidActive ? (GameData.DAY_CYCLE_SECONDS - secInDay) : (GameData.DAYLIGHT_SECONDS - secInDay);
+    }
+
+    public int getDayCycleProgressPercent() {
+        int secInDay = getElapsedSeconds() % GameData.DAY_CYCLE_SECONDS;
+        if (!raidActive) {
+            return secInDay * 100 / GameData.DAYLIGHT_SECONDS;
+        }
+        int nightLen = GameData.DAY_CYCLE_SECONDS - GameData.DAYLIGHT_SECONDS;
+        return (secInDay - GameData.DAYLIGHT_SECONDS) * 100 / Math.max(1, nightLen);
+    }
+
+    public int getAllyCount() {
+        return allies.size() + map.getGuardPosts().size();
     }
 
     public int getOuterChestCount() {
@@ -1272,6 +1451,11 @@ public final class GamePanel extends JPanel
                 drawList.add(b);
             }
         }
+        for (AllyNpc a : allies) {
+            if (near.contains(a.x, a.y)) {
+                drawList.add(a);
+            }
+        }
         drawList.add(player);
     }
 
@@ -1309,11 +1493,14 @@ public final class GamePanel extends JPanel
     /** Damage numbers, pickup labels, and base NPC interaction prompts in sharp screen pixels. */
     private void drawFloatingTexts(Graphics2D g2) {
         Point trader = map.getTraderPosition();
-        if (!gameOver && getCameraView().contains(trader)) {
-            String prompt = isPlayerInBase() ? "PRESS B: CAMP NPCS - CRAFT / HEAL / BUILD" : "BASE CAMP NPCS";
-            int tx = trader.x * SCALE - originX - Theme.pixelWidth(prompt, 2) / 2;
-            int ty = Math.max(12, (trader.y - 20) * SCALE - originY);
-            Theme.drawPixelTextShadow(g2, prompt, tx, ty, 2, isPlayerInBase() ? Theme.GOLD : Theme.TEXT_2);
+        if (!gameOver && player.distanceTo(trader.x, trader.y) < 125) {
+            String prompt = "PRESS B - CAMP NPC";
+            int pw = Theme.pixelWidth(prompt, 2) + 16;
+            int ph = 20;
+            int tx = trader.x * SCALE - originX - pw / 2;
+            int ty = Math.max(8, (trader.y - 26) * SCALE - originY);
+            Theme.paintPanel(g2, Theme.Panel.GLASS, tx, ty, pw, ph, 1);
+            Theme.drawPixelTextShadow(g2, prompt, tx + 8, ty + 5, 2, Theme.GOLD);
         }
         Composite old = g2.getComposite();
         for (Effect e : effects) {
@@ -1360,13 +1547,16 @@ public final class GamePanel extends JPanel
         }
         Graphics2D mg = nightMask.createGraphics();
         mg.setComposite(AlphaComposite.Src);
-        mg.setColor(new Color(8, 12, 26, Math.round(nightAlpha * 165)));
+        mg.setColor(new Color(8, 12, 26, Math.round(nightAlpha * 130)));
         mg.fillRect(0, 0, mw, mh);
 
         mg.setComposite(AlphaComposite.DstOut);
-        punchLightPool(mg, (float) (player.getX() - camX), (float) (player.getY() - camY), 90f);
+        punchLightPool(mg, (float) (player.getX() - camX), (float) (player.getY() - camY), 115f);
         Rectangle camp = map.getCampArea();
-        punchLightPool(mg, (float) (camp.getCenterX() - camX), (float) (camp.getCenterY() - camY), 130f);
+        punchLightPool(mg, (float) (camp.getCenterX() - camX), (float) (camp.getCenterY() - camY), 145f);
+        for (AllyNpc a : allies) {
+            punchLightPool(mg, (float) (a.x - camX), (float) (a.y - camY), 68f);
+        }
         for (Point gp : map.getGuardPosts()) {
             punchLightPool(mg, (float) (gp.x - camX), (float) (gp.y - camY), 68f);
         }
@@ -1476,6 +1666,11 @@ public final class GamePanel extends JPanel
                 g.fillRect(mx - 1, my - 1, 3, 3);   // ordinary monsters as small dots, so a horde stays readable
             }
         }
+        g.setColor(new Color(0x88D470));
+        for (AllyNpc a : allies) {
+            int ax = left + (int) (a.x * perPx), ay = top + (int) (a.y * perPx);
+            g.fillRect(ax - 1, ay - 1, 3, 3);
+        }
         g.setColor(new Color(240, 230, 192, 110));
         g.drawRect(left + (int) (camX * perPx), top + (int) (camY * perPx),
                 (int) (getViewWidth() / (double) SCALE * perPx), (int) (getViewHeight() / (double) SCALE * perPx));
@@ -1490,7 +1685,7 @@ public final class GamePanel extends JPanel
                 : "CAMP: " + getDistanceFromCampMeters() + "M " + getCompassDirectionToCamp();
         Theme.drawPixelTextShadow(g, zoneText, left + 2, boxY + 8, 2,
                 isPlayerInBase() ? new Color(0x88D470) : Theme.GOLD);
-        String intel = "CHESTS " + getOuterChestCount() + "  BASE LV " + getTotalBaseLevel();
+        String intel = "CHESTS " + getOuterChestCount() + "  ALLIES " + getAllyCount();
         Theme.drawPixelTextShadow(g, intel, left + 2, boxY + 24, 2, Theme.TEXT_2);
         g.dispose();
     }
@@ -1513,9 +1708,9 @@ public final class GamePanel extends JPanel
         float alpha = Math.min(1f, Math.min(age / 15f, (b.length - age) / 30f));
         Graphics2D g = (Graphics2D) g2.create();
         g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, alpha)));
-        int cx = getViewWidth() / 2, top = getViewHeight() / 5;
-        Theme.drawPixelTextShadow(g, b.title, cx - Theme.pixelWidth(b.title, 6) / 2, top, 6, b.color);
-        top += 34;
+        int cx = getViewWidth() / 2, top = getViewHeight() / 7;
+        Theme.drawPixelTextShadow(g, b.title, cx - Theme.pixelWidth(b.title, 5) / 2, top, 5, b.color);
+        top += 28;
         Theme.drawBanner(g, b.subtitle.toUpperCase(), cx, top + 12, 2);
         g.dispose();
     }

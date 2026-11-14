@@ -130,7 +130,10 @@ public final class Monster extends Entity {
     /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside the base. */
     private void moveTowardsTarget(double dist) {
         boolean playerInCamp = map != null && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
-        double aggroRange = provoked ? 340.0 : 195.0;
+        if (!raiding && dist > 230.0) {
+            provoked = false;
+        }
+        double aggroRange = provoked ? 225.0 : 130.0;
         if (!raiding && (playerInCamp || dist > aggroRange)) {
             wanderOuterZone();
             return;

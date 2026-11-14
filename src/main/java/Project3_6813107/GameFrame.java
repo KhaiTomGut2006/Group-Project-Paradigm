@@ -135,8 +135,8 @@ public final class GameFrame extends JFrame implements ActionListener {
         JPanel middle = Theme.transparentPanel(new GridBagLayout());
         middle.add(column(centred(waveLabel), centred(timerLabel), centred(waveBar)));
 
-        scoreValueLabel = new Theme.PixelLabel("G0 W0 M0 F0", 2, Theme.GOLD);
-        scoreValueLabel.setToolTipText("Base Camp levels: Guard Posts, Walls, Med Tent, Supply Depot");
+        scoreValueLabel = new Theme.PixelLabel("1 NPC", 2, Theme.GOLD);
+        scoreValueLabel.setToolTipText("Active NPC allies & camp guards (recruit more at Base Camp [B])");
         killsValueLabel = new Theme.PixelLabel("0", 3, Theme.TEXT);
         autoFireBox = new JCheckBox("Auto-fire", settings.autoFire);
         Theme.styleCheckBox(autoFireBox);
@@ -144,8 +144,8 @@ public final class GameFrame extends JFrame implements ActionListener {
         autoFireBox.addActionListener(this);
         pauseButton = makeButton("Pause", Theme.ButtonStyle.GREY, "p");
         quitButton = makeButton("Quit", Theme.ButtonStyle.GREY, null);
-        JPanel right = Theme.row(10, column(Theme.caption("Camp"), scoreValueLabel),
-                column(Theme.caption("Hostiles"), killsValueLabel), autoFireBox, Theme.row(4, pauseButton, quitButton));
+        JPanel right = Theme.row(10, column(Theme.caption("Allies"), scoreValueLabel),
+                column(Theme.caption("Kills"), killsValueLabel), autoFireBox, Theme.row(4, pauseButton, quitButton));
 
         return makePlate(left, middle, right);
     }
@@ -257,11 +257,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         injuredIcon.setVisible(p.isAlive() && hpPercent < 30);
         bleedingIcon.setVisible(p.isHurt());
         refreshWaveAndTime();
-        String campStatus = "G" + p.getLevel(GameData.RecipeKind.BASE_TURRET)
-                + " W" + p.getLevel(GameData.RecipeKind.BASE_WALL)
-                + " M" + p.getLevel(GameData.RecipeKind.BASE_MEDIC)
-                + " F" + p.getLevel(GameData.RecipeKind.BASE_FARM);
-        scoreValueLabel.setText(campStatus);
+        scoreValueLabel.setText(gamePanel.getAllyCount() + " NPC");
         killsValueLabel.setText(String.valueOf(gamePanel.getKills()));
         pauseButton.setText(gamePanel.isPaused() ? "RESUME" : "PAUSE");
         hotbar.update(p);
@@ -273,11 +269,13 @@ public final class GameFrame extends JFrame implements ActionListener {
         int day = gamePanel.getDay();
         int elapsed = gamePanel.getElapsedSeconds();
         int left = Math.max(0, gamePanel.getTimeLimitSeconds() - elapsed);
-        String phase = gamePanel.isNight() ? "NIGHTFALL" : "DAYLIGHT";
-        String zone = gamePanel.isPlayerInBase() ? "SAFE CAMP" : "WASTELAND";
-        waveLabel.setText("DAY " + day + ": " + phase + " - " + zone);
+        int phaseLeft = Math.max(0, gamePanel.getPhaseSecondsRemaining());
+        String status = gamePanel.isNight()
+                ? "DAY " + day + " NIGHT - DAWN " + formatTime(phaseLeft)
+                : "DAY " + day + " DAY - NIGHT " + formatTime(phaseLeft);
+        waveLabel.setText(status);
         waveLabel.setColor(gamePanel.isNight() ? Theme.RED : (gamePanel.isPlayerInBase() ? new Color(0x88D470) : Theme.GOLD));
-        waveBar.setValue(gamePanel.getWaveProgressPercent());
+        waveBar.setValue(gamePanel.getDayCycleProgressPercent());
         timerLabel.setText(formatTime(left));
         timerLabel.setColor(left <= 30 ? Theme.GOLD : Theme.TEXT);
     }

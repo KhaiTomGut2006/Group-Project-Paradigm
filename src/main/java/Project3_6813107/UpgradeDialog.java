@@ -380,6 +380,7 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
     private static String actionLabelFor(GameData.UpgradeRecipe r) {
         switch (r.kind) {
             case BASE_TURRET:
+                return "RECRUIT";
             case BASE_WALL:
             case BASE_MEDIC:
             case BASE_FARM:
@@ -463,7 +464,7 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
 
     /** "Craft Revolver" -> "Revolver": the list already says what kind it is. */
     private static String shortName(GameData.UpgradeRecipe r) {
-        return r.name.replaceFirst("^(Craft|Upgrade|Reinforce) ", "");
+        return r.name.replaceFirst("^(Craft|Upgrade|Reinforce|Recruit) ", "");
     }
 
     private static ImageIcon iconFor(GameData.UpgradeRecipe r) {
