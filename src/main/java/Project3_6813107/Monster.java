@@ -192,52 +192,33 @@ public final class Monster extends Entity {
         updateRangedAttack(dist);
     }
 
-    /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside the base. */
+    /** Marches straight down vertical highway lanes towards the player, steering inward near impact. */
     private void moveTowardsTarget(double dist) {
-        boolean playerInCamp = map != null && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
-        if (!raiding && dist > 230.0) {
-            provoked = false;
-        }
-        double aggroRange = provoked ? 225.0 : 130.0;
-        if (!raiding && (playerInCamp || dist > aggroRange)) {
-            wanderOuterZone();
+        if (target == null) {
             return;
         }
-        if (--repathTimer <= 0) {
-            repathTimer = 6;
-            chaseAngle = map == null ? angleTo(target) : map.getChaseAngle(x, getFeetY() - 4, target.getX(), target.getFeetY() - 4, width);
+        double dyToPlayer = target.getY() - y;
+        double dxToPlayer = target.getX() - x;
+        if (dyToPlayer > 22) {
+            double steerFactor = (dyToPlayer < 120) ? 0.018 : 0.004;
+            double horizMul = Math.max(-0.38, Math.min(0.38, dxToPlayer * steerFactor));
+            moveWithCollision(horizMul * speed, speed);
+            return;
         }
-        double moveAngle = chaseAngle;
+        if (dist < 6) {
+            return;
+        }
+        double moveAngle = angleTo(target);
         double moveSpeed = speed;
         if (type.preferredDistance > 0) {
             if (dist < type.preferredDistance * 0.75) {
-                moveAngle = angleTo(target) + Math.PI;              // too close: back off
+                moveAngle = angleTo(target) + Math.PI;
             } else if (dist < type.preferredDistance * 1.15) {
-                moveAngle = angleTo(target) + strafeSign * Math.PI / 2;   // in range: circle
+                moveAngle = angleTo(target) + strafeSign * Math.PI / 2;
                 moveSpeed = speed * 0.6;
             }
-        } else if (dist < 6) {
-            return;   // already hugging the player
         }
-        if (nudgeTicks > 0) {
-            nudgeTicks--;
-            moveAngle = nudgeAngle;
-        }
-        double oldX = x, oldY = y;
         moveWithCollision(Math.cos(moveAngle) * moveSpeed, Math.sin(moveAngle) * moveSpeed);
-        if (Math.hypot(x - oldX, y - oldY) > moveSpeed * 0.3) {
-            stuckTicks = 0;   // moving (sliding along a wall counts as moving)
-            return;
-        }
-        // barely moving: after a short while, step sideways for a moment so we do not grind on a corner
-        stuckTicks++;
-        if (stuckTicks > 12) {
-            stuckTicks = 0;
-            strafeSign = -strafeSign;
-            nudgeAngle = chaseAngle + strafeSign * Math.PI / 2;
-            nudgeTicks = 18;
-            repathTimer = 0;
-        }
     }
 
     /** Roams outer zones during scavenge phase without entering the player's safe base camp. */

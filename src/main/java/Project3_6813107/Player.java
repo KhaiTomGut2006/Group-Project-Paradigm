@@ -79,12 +79,13 @@ public final class Player extends Entity {
         for (GameData.RecipeKind k : GameData.RecipeKind.values()) {
             levels.put(k, 0);
         }
-        inventory.put(GameData.ItemType.AMMO, GameData.PLAYER_START_AMMO + playerClass.bonusAmmo);
-        inventory.put(GameData.ItemType.MEDKIT, playerClass.startMedkits);
-        inventory.put(GameData.ItemType.GRENADE, playerClass.startGrenades);
-        inventory.put(GameData.ItemType.SCRAPS, 2 + playerClass.startScraps);
-        ownedWeapons.add(GameData.WeaponType.KNIFE);
-        ownedWeapons.add(GameData.WeaponType.PISTOL);
+        inventory.put(GameData.ItemType.AMMO, 999);
+        inventory.put(GameData.ItemType.MEDKIT, 0);
+        inventory.put(GameData.ItemType.GRENADE, Math.max(3, playerClass.startGrenades));
+        inventory.put(GameData.ItemType.SCRAPS, 0);
+        for (GameData.WeaponType wt : GameData.HOTBAR_WEAPONS) {
+            ownedWeapons.add(wt);
+        }
         GameData.WeaponType chosen = this.settings.startWeapon != null
                 ? this.settings.startWeapon : GameData.WeaponType.PISTOL;
         ownedWeapons.add(chosen);
@@ -191,10 +192,6 @@ public final class Player extends Entity {
             return out;
         }
         GameData.WeaponType w = currentWeapon;
-        if (w.ammoCost > inventory.get(GameData.ItemType.AMMO)) {
-            fallBackFromEmptyWeapon();
-            return out;
-        }
         double hx = getHandX(), hy = getHandY();
         double angle = Math.atan2(targetY - hy, targetX - hx);
         int dmg = getWeaponDamage(w);
@@ -217,7 +214,7 @@ public final class Player extends Entity {
                 b.setMap(map);
                 out.add(b);
             }
-            inventory.put(GameData.ItemType.AMMO, inventory.get(GameData.ItemType.AMMO) - w.ammoCost);
+            inventory.put(GameData.ItemType.AMMO, 999);
             shootAnimTick = 0;
         }
         swingAngle = angle;
@@ -227,8 +224,8 @@ public final class Player extends Entity {
     }
 
     /**
-     * Rhythm-mode fire: scales weapon damage and projectile boost by beat judgment, grants free
-     * ammo during Fever Overdrive, and caps gun cooldowns so slow weapons can still fire on beat.
+     * Rhythm-mode fire: scales weapon damage and projectile boost by beat judgment, with infinite
+     * rhythm ammo and beat-synced gun cooldowns so slow weapons can still fire on beat.
      */
     public synchronized List<Bullet> shootRhythm(double targetX, double targetY, GameData.RhythmJudge judge, boolean feverActive) {
         List<Bullet> out = new ArrayList<>();
@@ -236,10 +233,6 @@ public final class Player extends Entity {
             return out;
         }
         GameData.WeaponType w = currentWeapon;
-        if (!feverActive && w.ammoCost > inventory.get(GameData.ItemType.AMMO)) {
-            fallBackFromEmptyWeapon();
-            return out;
-        }
         double hx = getHandX(), hy = getHandY();
         double angle = Math.atan2(targetY - hy, targetX - hx);
         double mult = judge.damageMult * (feverActive ? 1.35 : 1.0);
@@ -269,9 +262,7 @@ public final class Player extends Entity {
                 b.applyRhythmBoost(tier, extraPierce, speedMult);
                 out.add(b);
             }
-            if (!feverActive) {
-                inventory.put(GameData.ItemType.AMMO, Math.max(0, inventory.get(GameData.ItemType.AMMO) - w.ammoCost));
-            }
+            inventory.put(GameData.ItemType.AMMO, 999);
             shootAnimTick = 0;
         }
         swingAngle = angle;
@@ -295,7 +286,7 @@ public final class Player extends Entity {
             return null;
         }
         if (inventory.get(GameData.ItemType.GRENADE) <= 0) {
-            showHint("No grenades - bandits drop them");
+            showHint("No grenades left");
             grenadeCooldown = GameData.msToTicks(GameData.GRENADE_COOLDOWN_MS);
             return null;
         }
@@ -577,7 +568,7 @@ public final class Player extends Entity {
     }
 
     public synchronized int getAmmo() {
-        return inventory.get(GameData.ItemType.AMMO);
+        return 999;
     }
 
     public synchronized void addInventory(GameData.ItemType type, int amount) {

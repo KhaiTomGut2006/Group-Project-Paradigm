@@ -32,6 +32,8 @@ public final class GameMap {
 
     public static final int COLS = 56, ROWS = 36;
     private static final int T = GameData.TILE;
+    public static final int ROAD_LEFT_COL = 22;
+    public static final int ROAD_RIGHT_COL = 33;
 
     // ------------------------------------------------------------------ drawing order
     /** Anything drawn in the world layer that must be sorted by its feet line (props and entities). */
@@ -56,6 +58,10 @@ public final class GameMap {
         private int animTick;
 
         Prop(String name, BufferedImage[] frames, int ticksPerFrame, int drawX, int drawY, Rectangle solid, double sortY) {
+            this(name, frames, ticksPerFrame, drawX, drawY, solid, sortY, 0);
+        }
+
+        Prop(String name, BufferedImage[] frames, int ticksPerFrame, int drawX, int drawY, Rectangle solid, double sortY, int animTick) {
             this.name = name;
             this.frames = frames;
             this.ticksPerFrame = ticksPerFrame;
@@ -63,6 +69,15 @@ public final class GameMap {
             this.drawY = drawY;
             this.solid = solid;
             this.sortY = sortY;
+            this.animTick = animTick;
+        }
+
+        Prop shiftedY(int dy) {
+            if (dy == 0) {
+                return this;
+            }
+            Rectangle shiftedSolid = solid == null ? null : new Rectangle(solid.x, solid.y + dy, solid.width, solid.height);
+            return new Prop(name, frames, ticksPerFrame, drawX, drawY + dy, shiftedSolid, sortY + dy, animTick);
         }
 
         public String getName() {
@@ -355,20 +370,11 @@ public final class GameMap {
         for (int i = 0; i < ROWS * COLS; i++) {
             solidsByCell.add(new ArrayList<>());
         }
-        int campCol = COLS / 2 - 6, campRow = ROWS / 2 - 5;
-        campArea = new Rectangle(campCol * T, campRow * T, 12 * T, 10 * T);
-        playerSpawn = new Point(campArea.x + campArea.width / 2, campArea.y + campArea.height / 2 + T);
-        buildCamp();
-        // the camp's open middle must stay free of anything the map adds later
-        keepClear.add(new Rectangle(campArea.x + T, campArea.y + 3 * T, campArea.width - 2 * T, campArea.height - 3 * T));
-
-        switch (type) {
-            case WASTELAND_HIGHWAY: buildHighway(); break;
-            case SURVIVOR_CAMP: buildSurvivorCamp(); break;
-            case ABANDONED_BUNKER: buildBunker(); break;
-            case GAS_STATION: buildGasStation(); break;
-            default: buildQuarantine(); break;
-        }
+        int midY = (ROWS - 6) * T;
+        playerSpawn = new Point((int) Math.round(getHighwayCenterX()), midY);
+        campArea = new Rectangle(ROAD_LEFT_COL * T, (ROWS - 8) * T, 12 * T, 6 * T);
+        traderPosition = new Point(playerSpawn);
+        buildVerticalRhythmHighway();
         renderGround();
         computeWalkable();
         findSpawnPoints();
@@ -389,26 +395,29 @@ public final class GameMap {
         return ROWS * T;
     }
 
-    /** True if the rectangle leaves the walkable area or touches a solid footprint / wall. */
+    public double getHighwayLeftX() {
+        return ROAD_LEFT_COL * T;
+    }
+
+    public double getHighwayRightX() {
+        return (ROAD_RIGHT_COL + 1) * T;
+    }
+
+    public double getHighwayCenterX() {
+        return (ROAD_LEFT_COL + ROAD_RIGHT_COL + 1) * T * 0.5;
+    }
+
+    /** Returns the world X center of one of the 4 vertical highway lanes (0..3). */
+    public double getLaneX(int lane) {
+        int c = Math.max(0, Math.min(3, lane));
+        return getHighwayLeftX() + 48.0 + c * 96.0;
+    }
+
+    /** Corridor clamp: keeps runner and vertical zombie lanes inside the 4-lane highway across infinite Y wraps. */
     public boolean isBlocked(Rectangle r) {
-        if (!playArea.contains(r)) {
-            return true;
-        }
-        int c0 = r.x / T, c1 = (r.x + r.width - 1) / T;
-        int r0 = r.y / T, r1 = (r.y + r.height - 1) / T;
-        for (int row = r0; row <= r1; row++) {
-            for (int col = c0; col <= c1; col++) {
-                if (wall[row][col]) {
-                    return true;
-                }
-                for (Rectangle s : solidsByCell.get(row * COLS + col)) {
-                    if (s.intersects(r)) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
+        double minX = getHighwayLeftX() + 6;
+        double maxX = getHighwayRightX() - 6;
+        return r.x < minX || (r.x + r.width) > maxX;
     }
 
     /** Where the player starts: the middle of the camp clearing. */
@@ -628,13 +637,25 @@ public final class GameMap {
         }
     }
 
-    /** Draws only the visible part of the pre-rendered ground (world coordinates). */
+    /** Draws seamlessly tiling ground slabs vertically for infinite corridor scrolling. */
     public void drawGround(Graphics2D g2, Rectangle cameraView) {
-        Rectangle v = cameraView.intersection(new Rectangle(0, 0, getWidthPx(), getHeightPx()));
-        if (v.isEmpty()) {
+        int h = getHeightPx();
+        int w = getWidthPx();
+        int ty0 = Math.floorDiv(cameraView.y, h);
+        int ty1 = Math.floorDiv(cameraView.y + cameraView.height, h);
+        int x0 = Math.max(0, cameraView.x);
+        int x1 = Math.min(w, cameraView.x + cameraView.width);
+        if (x1 <= x0) {
             return;
         }
-        g2.drawImage(ground, v.x, v.y, v.x + v.width, v.y + v.height, v.x, v.y, v.x + v.width, v.y + v.height, null);
+        for (int ty = ty0; ty <= ty1; ty++) {
+            int offsetY = ty * h;
+            int y0 = Math.max(cameraView.y, offsetY);
+            int y1 = Math.min(cameraView.y + cameraView.height, offsetY + h);
+            if (y1 > y0) {
+                g2.drawImage(ground, x0, y0, x1, y1, x0, y0 - offsetY, x1, y1 - offsetY, null);
+            }
+        }
     }
 
     /** All props (read-only list). */
@@ -642,12 +663,19 @@ public final class GameMap {
         return Collections.unmodifiableList(props);
     }
 
-    /** Props whose picture overlaps the view (so the panel does not sort hundreds of off-screen props). */
+    /** Props whose picture overlaps the vertically tiled view. */
     public List<Prop> getPropsInView(Rectangle cameraView) {
         List<Prop> list = new ArrayList<>();
-        for (Prop p : props) {
-            if (p.getDrawBounds().intersects(cameraView)) {
-                list.add(p);
+        int h = getHeightPx();
+        int ty0 = Math.floorDiv(cameraView.y - 96, h);
+        int ty1 = Math.floorDiv(cameraView.y + cameraView.height + 96, h);
+        for (int ty = ty0; ty <= ty1; ty++) {
+            int offsetY = ty * h;
+            Rectangle localView = new Rectangle(cameraView.x, cameraView.y - offsetY, cameraView.width, cameraView.height);
+            for (Prop p : props) {
+                if (p.getDrawBounds().intersects(localView)) {
+                    list.add(p.shiftedY(offsetY));
+                }
             }
         }
         return list;
@@ -940,6 +968,84 @@ public final class GameMap {
                     wall[r][c] = true;
                 }
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ vertical rhythm highway
+    /**
+     * Builds an obstacle-free, seamlessly repeating 4-lane vertical corridor for Rhythm Shooter
+     * mode with themed props flanking both sides of the highway.
+     */
+    private void buildVerticalRhythmHighway() {
+        boolean bunker = type == GameData.MapType.ABANDONED_BUNKER;
+        int roadW = ROAD_RIGHT_COL - ROAD_LEFT_COL + 1;
+        if (bunker) {
+            paint(FLOOR, 0, 0, COLS, ROWS);
+            wallRect(8, 0, 8, ROWS);
+            wallRect(COLS - 16, 0, 8, ROWS);
+        } else {
+            paint(bunker ? FLOOR : DIRT, ROAD_LEFT_COL, 0, roadW, ROWS);
+        }
+        reserve(ROAD_LEFT_COL - 1, 0, roadW + 2, ROWS);
+
+        // 3 vertical lane-divider dash lines splitting the highway into 4 vertical zombie lanes
+        for (int laneSep = 0; laneSep < 3; laneSep++) {
+            int lineX = (int) Math.round(getHighwayLeftX() + (laneSep + 1) * 96.0);
+            roadLine(0, ROWS - 1, lineX, true);
+        }
+
+        // Roadside flame barrels and warning barriers framing the left/right edges every 6 rows
+        for (int r = 3; r <= ROWS - 3; r += 6) {
+            putTile(FLAME_BARREL, ROAD_LEFT_COL - 2, r);
+            putTile(FLAME_BARREL, ROAD_RIGHT_COL + 2, r);
+            if (r + 3 <= ROWS - 3) {
+                putTile(r % 12 == 3 ? BARREL_ORANGE_G : BARREL_RED_G, ROAD_LEFT_COL - 2, r + 3);
+                putTile(r % 12 == 3 ? BARREL_RED_G : TIRES_LOW_G, ROAD_RIGHT_COL + 2, r + 3);
+            }
+        }
+
+        // Left & right themed roadside props (rows 3..ROWS-3 so vertical wrap has zero clipping)
+        switch (type) {
+            case ABANDONED_BUNKER:
+                for (int r = 4; r <= ROWS - 4; r += 7) {
+                    putLeft(LOCKER_DOUBLE, 17, r);
+                    putLeft(DESK_PC_V, 19, r + 2);
+                    putLeft(RACK_STOCKED, ROAD_RIGHT_COL + 4, r);
+                    putLeft(VENDING_RED, ROAD_RIGHT_COL + 6, r + 2);
+                }
+                break;
+            case GAS_STATION:
+                for (int r = 5; r <= ROWS - 5; r += 8) {
+                    putLeft(PUMP_G, 18, r);
+                    putLeft(CAR_RED_V, 16, r + 3);
+                    putLeft(PUMP_BURNT, ROAD_RIGHT_COL + 4, r);
+                    putLeft(VAN_BURNT_V, ROAD_RIGHT_COL + 6, r + 3);
+                }
+                break;
+            case SURVIVOR_CAMP:
+                for (int r = 4; r <= ROWS - 4; r += 8) {
+                    putLeft(TENT_A, 16, r);
+                    putTile(FLAG, 19, r + 3);
+                    putLeft(TENT_GREEN, ROAD_RIGHT_COL + 4, r);
+                    putTile(WATER_TOWER, ROAD_RIGHT_COL + 6, r + 3);
+                }
+                break;
+            case QUARANTINE_ZONE:
+                for (int r = 4; r <= ROWS - 4; r += 7) {
+                    putLeft(SIGN_QUARANTINE, 17, r);
+                    putLeft(TENT_GREEN_FLAT, 17, r + 3);
+                    putLeft(BARREL_RED_G, ROAD_RIGHT_COL + 4, r);
+                    putLeft(CRATE_METAL_G, ROAD_RIGHT_COL + 5, r + 2);
+                }
+                break;
+            default: // WASTELAND_HIGHWAY
+                for (int r = 4; r <= ROWS - 4; r += 7) {
+                    putLeft(r % 14 == 4 ? CAR_RED_V : CAR_BURNT_V, 18, r);
+                    putLeft(SIGN_DANGER, 17, r + 3);
+                    putLeft(r % 14 == 4 ? CAR_BLUE_V : VAN_BURNT_V, ROAD_RIGHT_COL + 4, r);
+                    putLeft(STOP_SIGN, ROAD_RIGHT_COL + 6, r + 3);
+                }
+                break;
         }
     }
 
@@ -1822,33 +1928,19 @@ public final class GameMap {
         }
     }
 
-    /** Outdoor maps: a chain-link (or palisade) fence around the whole arena. */
+    /** Outdoor maps: vertical side borders only so scrolling top-to-bottom tiles cleanly. */
     private void drawFenceBorder(Graphics2D g) {
         boolean palisade = type == GameData.MapType.SURVIVOR_CAMP;
-        BufferedImage panel = palisade ? LOGS_TIED.images()[0] : CHAIN_PANEL.images()[0];
         BufferedImage post = AssetLoader.subImage(CAMP, 16, 50, 6, 30);
-        // top and bottom rows
-        int step = palisade ? 24 : panel.getWidth();
-        for (int x = -4; x < COLS * T; x += step) {
-            if (palisade) {
-                g.drawImage(panel, x, T - panel.getHeight() + 6, null);
-            } else {
-                g.drawImage(panel, x, T - panel.getHeight() + 2, null);
-            }
-        }
-        for (int x = -4; x < COLS * T; x += step) {
-            int y = ROWS * T - panel.getHeight() + (palisade ? 4 : 0);
-            g.drawImage(panel, x, y, null);
-        }
         // left and right columns
         for (int y = 0; y < ROWS * T; y += post.getHeight()) {
             if (palisade) {
                 BufferedImage log = LOG_SINGLE.images()[0];
-                g.drawImage(log, T - 14, y, null);
-                g.drawImage(log, COLS * T - T + 3, y, null);
+                g.drawImage(log, ROAD_LEFT_COL * T - 22, y, null);
+                g.drawImage(log, (ROAD_RIGHT_COL + 1) * T + 8, y, null);
             } else {
-                g.drawImage(post, T - 6, y, null);
-                g.drawImage(post, COLS * T - T, y, null);
+                g.drawImage(post, ROAD_LEFT_COL * T - 10, y, null);
+                g.drawImage(post, (ROAD_RIGHT_COL + 1) * T + 4, y, null);
             }
         }
     }
@@ -1890,65 +1982,22 @@ public final class GameMap {
         return openSouth[Math.min(r, nr)][c];
     }
 
-    /**
-     * Spawn points: tiles within 3 tiles of the border, reachable from the camp, where both a normal
-     * monster and the boss fit when their hitbox centre is put on the point.
-     */
+    /** Spawn points aligned along the 4 vertical highway lanes ahead of the player. */
     private void findSpawnPoints() {
-        int[][] fromCamp = new int[ROWS][COLS];
-        fillDistances(fromCamp, playerSpawn.x / T, playerSpawn.y / T);
-        GameData.MonsterType big = GameData.MonsterType.ZOMBIE_BOSS;
-        for (int r = 1; r < ROWS - 1; r++) {
-            for (int c = 1; c < COLS - 1; c++) {
-                boolean nearEdge = r <= 3 || c <= 3 || r >= ROWS - 4 || c >= COLS - 4;
-                if (!nearEdge || fromCamp[r][c] == FAR) {
-                    continue;
-                }
-                Point p = new Point(c * T + T / 2, r * T + 8);
-                // feet boxes exactly as Entity.getFeetBounds() will compute them
-                Rectangle bossFeet = new Rectangle(p.x - big.hitboxW / 2, p.y + big.hitboxH / 2 - 8, big.hitboxW, 8);
-                Rectangle smallFeet = new Rectangle(p.x - 7, p.y + 1, 14, 8);
-                if (!isBlocked(bossFeet) && !isBlocked(smallFeet)) {
-                    spawnPoints.add(p);
-                }
-            }
-        }
-        if (spawnPoints.isEmpty()) {
-            spawnPoints.add(new Point(playerSpawn));   // never happens with the built-in maps
+        spawnPoints.clear();
+        for (int lane = 0; lane < 4; lane++) {
+            int lx = (int) Math.round(getLaneX(lane));
+            spawnPoints.add(new Point(lx, 3 * T));
+            spawnPoints.add(new Point(lx, 7 * T));
         }
     }
 
-    /**
-     * Builds a closed 12-waypoint patrol loop around all four quadrants of the map, snapping each
-     * anchor to the nearest tile reachable on foot from playerSpawn.
-     */
+    /** Straight North waypoints down the center of the vertical highway corridor. */
     private void buildAutoRunRoute() {
         autoRunRoute.clear();
-        int[][] fromCamp = new int[ROWS][COLS];
-        fillDistances(fromCamp, playerSpawn.x / T, playerSpawn.y / T);
-        int sc = Math.max(2, Math.min(COLS - 3, playerSpawn.x / T));
-        int sr = Math.max(2, Math.min(ROWS - 3, playerSpawn.y / T));
-        int[][] anchors = {
-            {sc, sr},
-            {12, sr},
-            {7, 8},
-            {18, 6},
-            {36, 6},
-            {COLS - 8, 8},
-            {COLS - 7, ROWS / 2},
-            {COLS - 8, ROWS - 8},
-            {36, ROWS - 7},
-            {18, ROWS - 7},
-            {7, ROWS - 8},
-            {Math.max(4, sc - 3), sr}
-        };
-        for (int[] a : anchors) {
-            Point p = nearestReachablePoint(a[0], a[1], fromCamp);
-            if (p != null) {
-                if (autoRunRoute.isEmpty() || autoRunRoute.get(autoRunRoute.size() - 1).distance(p) > T * 1.5) {
-                    autoRunRoute.add(p);
-                }
-            }
+        int cx = (int) Math.round(getHighwayCenterX());
+        for (int r = ROWS - 4; r >= 4; r -= 4) {
+            autoRunRoute.add(new Point(cx, r * T));
         }
         if (autoRunRoute.isEmpty()) {
             autoRunRoute.add(new Point(playerSpawn));

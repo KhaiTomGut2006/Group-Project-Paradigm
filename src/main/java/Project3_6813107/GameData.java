@@ -445,11 +445,11 @@ public final class GameData {
     /** The 5 starting professions (JRadioButtons in the launcher). Multipliers are 1.0 = no change. */
     public enum PlayerClass {
         //                                                                         maxHp dmg   speed cd   pickup cost loot ammo med gren parts heal
-        SCAVENGER("Scavenger", "Bigger loot magnet and +20% drop chance.",              0, 1.0,  1.0,  1.0, 1.4,  1.0,  20,  0,  0,  0,  0, 1.0),
-        SOLDIER("Soldier", "+15% damage, starts with extra ammo and a grenade.",        0, 1.15, 1.0,  1.0, 1.0,  1.0,   0, 40,  0,  1,  0, 1.0),
-        MEDIC("Medic", "+25 max HP, starts with 2 medkits that heal 50% more.",        25, 1.0,  1.0,  1.0, 1.0,  1.0,   0,  0,  2,  0,  0, 1.5),
-        SCOUT("Scout", "+15% move speed and +10% fire rate.",                           0, 1.0,  1.15, 0.9, 1.0,  1.0,   0,  0,  0,  0,  0, 1.0),
-        ENGINEER("Engineer", "All crafting costs 25% less, starts with spare parts.",   0, 1.0,  1.0,  1.0, 1.0,  0.75,  0,  0,  0,  0,  8, 1.0);
+        SCAVENGER("Scavenger", "Balanced rhythm runner; starts with 4 beat grenades.",  0, 1.0,  1.0,  1.0, 1.4,  1.0,  20,  0,  0,  4,  0, 1.0),
+        SOLDIER("Soldier", "+15% weapon damage on every beat shot & grenade.",         0, 1.15, 1.0,  1.0, 1.0,  1.0,   0,  0,  0,  4,  0, 1.0),
+        MEDIC("Medic", "+35 max HP for enduring heavy highway waves.",                35, 1.0,  1.0,  1.0, 1.0,  1.0,   0,  0,  0,  3,  0, 1.5),
+        SCOUT("Scout", "+15% lane speed and +10% faster beat recovery.",               0, 1.0,  1.15, 0.9, 1.0,  1.0,   0,  0,  0,  3,  0, 1.0),
+        ENGINEER("Engineer", "+10% weapon damage & +10% faster fire recovery.",        0, 1.10, 1.0,  0.9, 1.0,  0.75,  0,  0,  0,  4,  0, 1.0);
 
         public final String displayName;
         public final String description;
@@ -494,11 +494,11 @@ public final class GameData {
     // ------------------------------------------------------------------ maps
     /** The 5 arenas. Each layout is generated from a fixed seed, so a map always looks the same. */
     public enum MapType {
-        WASTELAND_HIGHWAY("Wasteland Highway", "A broken desert highway full of wrecked cars.", 1001L),
-        SURVIVOR_CAMP("Survivor Camp", "A fenced tent town with market stalls and farm plots.", 2002L),
-        ABANDONED_BUNKER("Abandoned Bunker", "Concrete rooms: dorms, lab, storage and a canteen.", 3003L),
-        GAS_STATION("Gas Station", "A roadside fuel stop with pumps, crates and parked cars.", 4004L),
-        QUARANTINE_ZONE("Quarantine Zone", "Chain-link compounds, warning signs and field tents.", 5005L);
+        WASTELAND_HIGHWAY("Wasteland Highway", "Endless 4-lane desert highway lined with wrecked cars & flares.", 1001L),
+        SURVIVOR_CAMP("Survivor Camp", "Straight camp corridor flanked by survivor tents, flags & barrels.", 2002L),
+        ABANDONED_BUNKER("Abandoned Bunker", "Concrete underground corridor lined with lockers, labs & tech racks.", 3003L),
+        GAS_STATION("Gas Station", "Straight fuel-stop highway flanked by gas pumps, vans & barriers.", 4004L),
+        QUARANTINE_ZONE("Quarantine Zone", "Biohazard containment corridor with medical tents & warning signs.", 5005L);
 
         public final String displayName;
         public final String description;

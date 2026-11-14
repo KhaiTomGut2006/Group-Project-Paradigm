@@ -8,6 +8,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagLayout;
@@ -16,9 +17,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
-import java.util.EnumMap;
 import java.util.List;
-import java.util.Map;
 import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
@@ -31,13 +30,9 @@ import javax.swing.border.EmptyBorder;
 
 /**
  * The game window (1100 x 660), drawn with the Hollow Creek UI kit: a metal HUD plate on top
- * (heart, health bar, armour segments, status icons, wave and time, score, kills, auto-fire,
- * pause, quit), the GamePanel in the middle, and a metal plate at the bottom (weapon hotbar,
- * ammo counter, backpack slots, WORKSHOP button).
- *
- * The HUD is made of real Swing components. GamePanel asks for refreshHud() a few times per second
- * through SwingUtilities.invokeLater, so the components are only touched on the Swing thread.
- * No HUD component can take the keyboard focus, so W A S D always reach the GamePanel.
+ * (heart, health bar, status icons, beat stage and combo, score, kills, auto-fire, pause, quit),
+ * the GamePanel in the middle, and a metal plate at the bottom (all 7 weapons unlocked, INF ammo,
+ * pure rhythm control strip, and live Rank / Max Combo readout).
  */
 public final class GameFrame extends JFrame implements ActionListener {
 
@@ -51,7 +46,6 @@ public final class GameFrame extends JFrame implements ActionListener {
     private JLabel heartIcon;
     private JProgressBar hpBar;
     private Theme.PixelLabel hpValueLabel;
-    private JLabel armorSegments;
     private JLabel poisonedIcon;   // kit status icons, shown only while they apply
     private JLabel injuredIcon;
     private JLabel bleedingIcon;
@@ -66,26 +60,22 @@ public final class GameFrame extends JFrame implements ActionListener {
     // bottom HUD
     private HotbarView hotbar;
     private AmmoView ammoView;
-    private final transient Map<GameData.ItemType, Theme.Slot> itemSlots = new EnumMap<>(GameData.ItemType.class);
-    private JLabel emptyBackpackLabel;
-    private JPanel backpackRow;
-    private JButton workshopButton;
+    private Theme.PixelLabel rhythmRankLabel;
 
     private String shownHeart = "";            // icons are only swapped when they change
-    private int shownArmorLevel = -1;
     private boolean dialogOpen;
     private boolean finished;                  // onGameOver already ran
     private boolean closed;                    // threads stopped and window disposed
 
     /** Builds the window, shows it and starts the game. launcher may be null. */
     public GameFrame(GameData.GameSettings settings, MainApplication launcher) {
-        super("Last Camp Survivor");
+        super("Beat Highway Shooter");
         Theme.installLookAndFeel();   // does nothing if the launcher already did it
         this.settings = settings == null ? new GameData.GameSettings() : settings;
         this.launcher = launcher;
         gamePanel = new GamePanel(this.settings, this);
 
-        setTitle("Last Camp Survivor - " + gamePanel.getPlayer().getPlayerName() + " the "
+        setTitle("Beat Highway Shooter - " + gamePanel.getPlayer().getPlayerName() + " the "
                 + gamePanel.getPlayer().getPlayerClass().displayName);
         setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         addWindowListener(new WindowAdapter() {
@@ -115,28 +105,26 @@ public final class GameFrame extends JFrame implements ActionListener {
         return content;
     }
 
-    /** Heart, health, armour, status | wave and time | score, kills, auto-fire, pause, quit. */
+    /** Heart, health, status | beat stage, combo, fever | score, kills, auto-fire, pause, quit. */
     private JComponent buildTopBar() {
         heartIcon = new JLabel();
         hpBar = Theme.bar(Theme.Fill.HEALTH, 140, Theme.S);
         hpValueLabel = new Theme.PixelLabel("100/100", 2, Theme.TEXT);
-        armorSegments = new JLabel();
-        armorSegments.setToolTipText("Armour level (Workshop: Craft Armor Plating)");
-        poisonedIcon = statusIcon("poisoned", "Poisoned: you lose HP for a few seconds");
-        injuredIcon = statusIcon("injured", "Badly hurt: press E to use a medkit");
+        poisonedIcon = statusIcon("poisoned", "Poisoned: parry dash or land kills to heal");
+        injuredIcon = statusIcon("injured", "Low HP: parry dash (+6 HP) or chain kills");
         bleedingIcon = statusIcon("bleeding", "You were just hit");
         JPanel left = Theme.row(8, heartIcon, column(stack(hpBar), hpValueLabel),
-                column(armorSegments, Theme.caption("Armor")), Theme.row(2, poisonedIcon, injuredIcon, bleedingIcon));
+                Theme.row(2, poisonedIcon, injuredIcon, bleedingIcon));
 
-        waveLabel = new Theme.PixelLabel("125 BPM RUN - LAP 1", 2, Theme.TEXT_2);
-        timerLabel = new Theme.PixelLabel("5:00", 4, Theme.TEXT);
+        waveLabel = new Theme.PixelLabel("125 BPM OVERDRIVE - STAGE 1  5:00", 2, Theme.TEXT_2);
+        timerLabel = new Theme.PixelLabel("COMBO x0", 3, Theme.TEXT);
         timerLabel.setShadow(true);
-        waveBar = Theme.bar(Theme.Fill.STAMINA, 170, 1);
+        waveBar = Theme.bar(Theme.Fill.STAMINA, 180, 1);
         JPanel middle = Theme.transparentPanel(new GridBagLayout());
         middle.add(column(centred(waveLabel), centred(timerLabel), centred(waveBar)));
 
         scoreValueLabel = new Theme.PixelLabel("0 - 1X", 2, Theme.GOLD);
-        scoreValueLabel.setToolTipText("Total Rhythm Score and Combo Multiplier (press B anytime for Shop)");
+        scoreValueLabel.setToolTipText("Total Rhythm Score and Combo Multiplier");
         killsValueLabel = new Theme.PixelLabel("0", 3, Theme.TEXT);
         autoFireBox = new JCheckBox("Auto-fire", settings.autoFire);
         Theme.styleCheckBox(autoFireBox);
@@ -150,33 +138,20 @@ public final class GameFrame extends JFrame implements ActionListener {
         return makePlate(left, middle, right);
     }
 
-    /** Weapon hotbar and ammo | backpack slots | WORKSHOP button. */
+    /** Weapon hotbar (1-7 INF) | rhythm controls guide | live Rank & Max Combo readout. */
     private JComponent buildBottomBar() {
         hotbar = new HotbarView();
         ammoView = new AmmoView();
         JPanel left = Theme.row(10, hotbar, ammoView);
 
-        // one slot per item type; only items you actually have are shown
-        backpackRow = Theme.transparentPanel(new FlowLayout(FlowLayout.CENTER, 2, 0));
-        for (GameData.ItemType t : GameData.ItemType.values()) {
-            if (t == GameData.ItemType.CHEST) {
-                continue;   // chests open on the ground, they are never stored
-            }
-            Theme.Slot slot = new Theme.Slot(Theme.fit(AssetLoader.getItemIcon(t), 24, 24));
-            slot.setToolTipText(t.displayName);
-            slot.setVisible(false);
-            itemSlots.put(t, slot);
-            backpackRow.add(slot);
-        }
-        emptyBackpackLabel = new JLabel("Pack empty - scavenge outside & loot chests");
-        emptyBackpackLabel.setFont(Theme.font(java.awt.Font.PLAIN, 12));
-        emptyBackpackLabel.setForeground(Theme.TEXT_3);
-        backpackRow.add(emptyBackpackLabel);
-        JPanel middle = Theme.transparentPanel(new GridBagLayout());   // centres the row vertically
-        middle.add(backpackRow);
+        JLabel guideLabel = new JLabel("SPACE/CLICK: BEAT SHOT | SHIFT/R-CLICK: PARRY (+6 HP) | 1-7: GUNS");
+        guideLabel.setFont(Theme.font(Font.BOLD, 11));
+        guideLabel.setForeground(Theme.TEXT_2);
+        JPanel middle = Theme.transparentPanel(new GridBagLayout());
+        middle.add(guideLabel);
 
-        workshopButton = makeButton("Base NPC", Theme.ButtonStyle.RED, "b");
-        return makePlate(left, middle, centred(workshopButton));
+        rhythmRankLabel = new Theme.PixelLabel("RANK A  MAX 0X  ACC 100%", 2, Theme.GOLD);
+        return makePlate(left, middle, centred(rhythmRankLabel));
     }
 
     /** A HUD strip on the kit's metal panel: left, centre and right groups. */
@@ -247,12 +222,6 @@ public final class GameFrame extends JFrame implements ActionListener {
             shownHeart = heart;
             heartIcon.setIcon(new ImageIcon(Theme.fit(Theme.kit("bars/" + heart, 1), 27, 24)));
         }
-        int armorLevel = Math.min(5, p.getLevel(GameData.RecipeKind.ARMOR));
-        if (armorLevel != shownArmorLevel) {
-            shownArmorLevel = armorLevel;
-            armorSegments.setIcon(new ImageIcon(Theme.kit("bars/segments/health_segments_" + armorLevel + "of5", Theme.S)));
-        }
-        armorSegments.setToolTipText("Armour " + p.getArmorPercent() + "% less damage (level " + armorLevel + " of 5)");
         poisonedIcon.setVisible(p.isPoisoned());
         injuredIcon.setVisible(p.isAlive() && hpPercent < 30);
         bleedingIcon.setVisible(p.isHurt());
@@ -262,48 +231,23 @@ public final class GameFrame extends JFrame implements ActionListener {
         pauseButton.setText(gamePanel.isPaused() ? "RESUME" : "PAUSE");
         hotbar.update(p);
         ammoView.update(p);
-        refreshBackpack(p.getInventory());
+        rhythmRankLabel.setText("RANK " + gamePanel.getRhythmRank() + "  MAX " + gamePanel.getMaxCombo()
+                + "X  ACC " + gamePanel.getAccuracyPercent() + "%");
     }
 
     private void refreshWaveAndTime() {
         int elapsed = gamePanel.getElapsedSeconds();
         int left = Math.max(0, gamePanel.getTimeLimitSeconds() - elapsed);
-        int lap = gamePanel.getLapsCompleted() + 1;
+        int stage = gamePanel.getStageNumber();
         boolean fever = gamePanel.isFeverActive();
         String status = fever
-                ? ("125 BPM FEVER!  LAP " + lap)
-                : ("125 BPM RUN - LAP " + lap + "  DAY " + gamePanel.getDay());
+                ? ("125 BPM FEVER - STAGE " + stage + "  " + formatTime(left))
+                : ("125 BPM OVERDRIVE - STAGE " + stage + "  " + formatTime(left));
         waveLabel.setText(status);
-        waveLabel.setColor(fever ? Theme.GOLD : (gamePanel.isNight() ? Theme.RED : new Color(0x88D470)));
-        waveBar.setValue(fever ? gamePanel.getFeverPercent() : gamePanel.getDayCycleProgressPercent());
-        timerLabel.setText(formatTime(left));
-        timerLabel.setColor(left <= 30 ? Theme.GOLD : Theme.TEXT);
-    }
-
-    /** A kit slot for every item you hold; the row only re-lays out when that set changes. */
-    private void refreshBackpack(Map<GameData.ItemType, Integer> inventory) {
-        boolean layoutChanged = false;
-        boolean any = false;
-        for (Map.Entry<GameData.ItemType, Theme.Slot> e : itemSlots.entrySet()) {
-            int count = inventory.get(e.getKey());
-            Theme.Slot slot = e.getValue();
-            slot.update(Theme.SlotKind.NORMAL, Theme.fit(AssetLoader.getItemIcon(e.getKey()), 24, 24),
-                    String.valueOf(count), false);
-            slot.setToolTipText(e.getKey().displayName + ": " + count);
-            if (slot.isVisible() != (count > 0)) {
-                slot.setVisible(count > 0);
-                layoutChanged = true;
-            }
-            any |= count > 0;
-        }
-        if (emptyBackpackLabel.isVisible() == any) {
-            emptyBackpackLabel.setVisible(!any);
-            layoutChanged = true;
-        }
-        if (layoutChanged) {
-            backpackRow.revalidate();
-            backpackRow.repaint();
-        }
+        waveLabel.setColor(fever ? Theme.GOLD : new Color(0x5CE8FF));
+        waveBar.setValue(gamePanel.getFeverPercent());
+        timerLabel.setText("COMBO x" + gamePanel.getCombo());
+        timerLabel.setColor(fever ? Theme.GOLD : (gamePanel.getCombo() >= 10 ? new Color(0x5CE8FF) : Theme.TEXT));
     }
 
     private static String formatTime(int seconds) {
@@ -369,13 +313,13 @@ public final class GameFrame extends JFrame implements ActionListener {
         private String text = "0";
 
         AmmoView() {
-            setToolTipText("Ammo: shared by every gun except the pistol");
+            setToolTipText("Infinite Rhythm Ammo on all firearms");
             setPreferredSize(new Dimension(Theme.ammoCounterWidth("000", Theme.S), 16 * Theme.S));
         }
 
         void update(Player p) {
             GameData.WeaponType w = p.getCurrentWeapon();
-            String t = w.melee ? "--" : w.ammoCost == 0 ? "INF" : String.valueOf(p.getAmmo());
+            String t = w.melee ? "--" : "INF";
             if (!t.equals(text)) {
                 text = t;
                 repaint();
@@ -392,9 +336,7 @@ public final class GameFrame extends JFrame implements ActionListener {
     @Override
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
-        if (source == workshopButton) {
-            openUpgradeDialog();
-        } else if (source == pauseButton) {
+        if (source == pauseButton) {
             if (gamePanel.isPaused()) {
                 gamePanel.resumeGame();
             } else {
@@ -463,16 +405,16 @@ public final class GameFrame extends JFrame implements ActionListener {
         entry.seconds = gamePanel.getElapsedSeconds();
         GameData.saveScore(entry);
         String[][] stats = {
-            {"Days survived", entry.wave + " / 10"},
-            {"Infected killed", String.valueOf(entry.kills)},
-            {"Base upgrades", gamePanel.getTotalBaseLevel() + " built"},
-            {"Survival time", formatTime(entry.seconds)},
-            {"Region", entry.map.toUpperCase()}
+            {"Rhythm Rank", gamePanel.getRhythmRank()},
+            {"Max Combo", gamePanel.getMaxCombo() + "X"},
+            {"Beat Accuracy", gamePanel.getAccuracyPercent() + "%"},
+            {"Zombies Cleared", String.valueOf(entry.kills)},
+            {"Stage Reached", "Stage " + gamePanel.getStageNumber() + " / 5"}
         };
         Theme.ask(this, Theme.Panel.METAL, survived ? "titles/survived" : "titles/game_over",
-                survived ? "Survived" : "Game over",
-                (survived ? "Extraction arrived and the camp held through the night. " : "The infected overwhelmed you. ")
-                        + "Your survival log is saved.",
+                survived ? "Stage Clear" : "Game over",
+                (survived ? "You cleared the 125 BPM highway overdrive! " : "The zombie highway overwhelmed you. ")
+                        + "Your rhythm score is saved.",
                 stats, "Continue", null);
         closeGame();
     }

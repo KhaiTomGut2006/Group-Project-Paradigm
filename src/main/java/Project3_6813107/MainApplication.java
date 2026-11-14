@@ -112,7 +112,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private final transient Map<GameData.MapType, GameMap> mapCache = new EnumMap<>(GameData.MapType.class);
 
     public MainApplication() {
-        super("Beat Camp Survivor");
+        super("Beat Highway Shooter");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         JPanel root = new JPanel(new BorderLayout());
@@ -146,9 +146,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         JPanel title = Theme.transparentPanel(new GridLayout(0, 1, 0, 10));
         title.add(Theme.row(0, new Theme.PixelLabel("EGCO 213 - GROUP PROJECT 3", 2, Theme.GOLD)));
-        title.add(Theme.row(0, shadowed("BEAT CAMP", 6, Theme.TEXT)));
-        title.add(Theme.row(0, shadowed("SURVIVOR", 6, Theme.GOLD)));
-        title.add(Theme.row(0, new Theme.PixelLabel("125 BPM RHYTHM AUTO-RUNNER.", 2, Theme.TEXT_2)));
+        title.add(Theme.row(0, shadowed("BEAT ROAD", 6, Theme.TEXT)));
+        title.add(Theme.row(0, shadowed("OVERDRIVE", 6, Theme.GOLD)));
+        title.add(Theme.row(0, new Theme.PixelLabel("125 BPM VERTICAL RHYTHM SHOOTER.", 2, Theme.TEXT_2)));
         hero.add(title, BorderLayout.NORTH);
 
         JPanel crew = Theme.transparentPanel(new GridLayout(0, 1, 0, 4));
@@ -362,25 +362,23 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return onPanel(scorePages, Theme.Panel.METAL);
     }
 
-    /** How to play, written on the kit's paper note: goal, controls as key caps, the Day/Night survival loop. */
+    /** Pure rhythm highway instructions, controls, and beat note types on the kit's paper card. */
     private JComponent buildHelpPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
 
-        int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.DAY_CYCLE_SECONDS;
-        howToArea = Theme.textBlock("Survive " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
-                + " Day/Night cycles and 5 Beat Stages! Run at 125 BPM with Hybrid Lock-On: press SPACE/F or CLICK"
-                + " ON THE BEAT to snap-fire neon rail-beams, trigger hit-stop, and earn S-Ranks.",
+        howToArea = Theme.textBlock("Dash endlessly North down the 4-lane highway as zombie waves march vertically"
+                + " toward you at 125 BPM! Press SPACE / F or CLICK ON THE BEAT to lock on and blast neon"
+                + " rail-beams. All 7 weapons are unlocked with infinite ammo!",
                 13, Theme.PAPER_TEXT);
         form.add(new Theme.PixelLabel("BEAT OVERDRIVE GOAL", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 4);
 
         // each row: what it does, then the keys (sprites from the Hollow Creek UI kit)
         String[][] controls = {
-            {"Dodge / Strafe", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
-            {"Parry Dash", "shift", "mouse_right"}, {"Grenade", "g"},
-            {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"}, {"Switch Weapon", "mouse_mid"},
-            {"Upgrade Shop", "b"}, {"Pause", "p", "esc"}
+            {"Strafe", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
+            {"Parry +6HP", "shift", "mouse_right"}, {"Grenade", "g"},
+            {"Weapons 1-7 (INF)", "mouse_mid"}, {"Pause", "p", "esc"}
         };
         JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 5));
         for (String[] c : controls) {
@@ -392,8 +390,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         form.add(new Theme.PixelLabel("BEAT NOTES, PARRY DASH & SUPERNOVAS", 2, Theme.DARK_RED), 10);
         form.add(Theme.textBlock("CYAN: 1-Beat Shot. MAGENTA 2X: rapid half-beat pair. GOLD 3-2-1 STRIKE!: Supernova blast!"
-                + " Press SHIFT / RIGHT CLICK on beat for Parry Dash (i-frames, reflects shots, +8 Ammo)."
-                + " Fill Fever 100% for infinite ammo & 2x score!",
+                + " Press SHIFT / RIGHT CLICK on beat for Parry Dash (i-frames, deflects shots, +6 HP)."
+                + " Fill Fever 100% for 2x score and overdrive beat speed!",
                 13, Theme.PAPER_TEXT), 4);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);
@@ -562,8 +560,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private void showWeaponInfo() {
         GameData.WeaponType w = getSelectedWeapon();
         String dmg = w.pellets > 1 ? (w.damage + "x" + w.pellets) : String.valueOf(w.damage);
-        String ammo = w.melee ? "Melee Swing" : (w.ammoCost == 0 ? "Free Ammo" : (w.ammoCost + " Ammo/shot"));
-        weaponInfoArea.setText("DMG " + dmg + "  |  " + ammo + "\nRange " + w.range + " px  |  Pierce " + w.pierce);
+        weaponInfoArea.setText("DMG " + dmg + "  |  Infinite Rhythm Ammo\nRange " + w.range + " px  |  Pierce " + w.pierce);
         refreshHero();
     }
 
@@ -599,9 +596,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         boolean doubled = doubleSpawnBox.isSelected();
         difficultyValueLabel.setText(d + " - " + DIFFICULTY_NAMES[d - 1].toUpperCase());
         int zombieHp = (int) Math.round(GameData.MonsterType.ZOMBIE_NORMAL.maxHp * GameData.monsterHpScale(1, d));
-        difficultyInfoLabel.setText("Infected HP: " + zombieHp + ". Patrol density: "
-                + GameData.spawnBatchSize(1, d, doubled) + " by Day 1, "
-                + GameData.spawnBatchSize(5, d, doubled) + " by Day 5.");
+        difficultyInfoLabel.setText("Zombie HP: " + zombieHp + ". Wave density: "
+                + GameData.spawnBatchSize(1, d, doubled) + " in Stage 1, "
+                + GameData.spawnBatchSize(5, d, doubled) + " in Stage 5.");
     }
 
     /** Validates the name; on a problem it explains it under the field and puts the cursor back there. */
@@ -738,7 +735,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
      */
     private static final class ScoreTableModel extends AbstractTableModel {
         private static final long serialVersionUID = 1L;
-        private static final String[] COLUMNS = {"NO.", "SURVIVOR", "REGION", "#DAYS", "#KILLS", "#TIME"};
+        private static final String[] COLUMNS = {"NO.", "RUNNER", "CORRIDOR", "#WAVE", "#KILLS", "#TIME"};
         private final transient List<GameData.ScoreEntry> rows = new ArrayList<>();
 
         void setScores(List<GameData.ScoreEntry> scores) {

@@ -79,6 +79,10 @@ public abstract class Entity implements GameMap.Drawable {
         return y;
     }
 
+    public void shiftY(double dy) {
+        this.y += dy;
+    }
+
     public int getWidth() {
         return width;
     }

@@ -184,7 +184,8 @@ public final class GamePanel extends JPanel
 
         final Kind kind;
         double x, y;
-        final double x2, y2;
+        final double x2;
+        double y2;
         double vx, vy;
         final int life;
         int age;
@@ -386,33 +387,15 @@ public final class GamePanel extends JPanel
             BufferedImage blank = new BufferedImage(16, 16, BufferedImage.TYPE_INT_ARGB);
             setCursor(Toolkit.getDefaultToolkit().createCustomCursor(blank, new Point(0, 0), "blank"));
         }
-        updateCamera(1.0);   // start centred on the player
+        updateCamera(1.0);   // start centred on the highway and player
         preloadSprites();
-        spawnInitialScavengeWorld();
-        showBanner("BEAT CAMP OVERDRIVE", "STAGE 1: 125 BPM / SPACE OR CLICK: BEAT SHOT / SHIFT: PARRY", BANNER_WAVE);
+        spawnInitialRhythmWorld();
+        showBanner("BEAT HIGHWAY OVERDRIVE", "STAGE 1: 125 BPM / SPACE OR CLICK: BEAT SHOT / SHIFT: PARRY", BANNER_WAVE);
     }
 
-    /** Populates routes and outer zones with beat formations, supply chests, and 1 starting NPC companion. */
-    private void spawnInitialScavengeWorld() {
-        for (int i = 0; i < 4; i++) {
-            Point p = map.randomOuterLootPoint(rng);
-            DroppedItem chest = new DroppedItem(GameData.ItemType.CHEST, 1, p.x, p.y, player);
-            chest.setMap(map);
-            drops.add(chest);
-        }
-        spawnBeatFormation(3);
-        int wpCount = Math.max(1, map.getWaypointCount());
-        for (int i = 0; i < 4; i++) {
-            Point wp = map.getWaypoint((i + 1) % wpCount);
-            double px = wp.x + (rng.nextDouble() - 0.5) * 90;
-            double py = wp.y + (rng.nextDouble() - 0.5) * 90;
-            Point p = map.isBlocked(new Rectangle((int) px - 8, (int) py - 8, 16, 16))
-                    ? map.randomOuterLootPoint(rng) : new Point((int) px, (int) py);
-            Monster m = new Monster(GameData.MonsterType.ZOMBIE_NORMAL, p.x, p.y, map, player, GameData.monsterHpScale(1, getDifficulty()));
-            m.setRaiding(true);
-            monsters.add(m);
-        }
-        allies.add(new AllyNpc(0, player.getX() - 26, player.getY() + 12));
+    /** Populates the vertical 4-lane highway with the opening rhythm wave ahead of the runner. */
+    private void spawnInitialRhythmWorld() {
+        spawnBeatFormation(4);
         lastPlayerX = player.getX();
         lastPlayerY = player.getY();
     }
@@ -599,7 +582,7 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Survival time, 3-Day Day/Night transitions, 5 Beat Stages, boss timer and win. */
+    /** Rhythm timeline, 5 Beat Stages, boss spawns, beat pulse, and win timer. */
     private void updateClock() {
         if (!player.isAlive()) {
             return;   // the clock stops while the death animation plays
@@ -612,6 +595,10 @@ public final class GamePanel extends JPanel
         int newWave = 1 + elapsedTicks / WAVE_TICKS;
         if (newWave != wave) {
             wave = newWave;
+            if (wave % GameData.BOSS_EVERY_WAVES == 0 && bossTimer <= 0) {
+                bossTimer = BOSS_WARNING_TICKS;
+                showBanner("BOSS APPROACHING", "APEX MUTANT AHEAD ON THE HIGHWAY!", BANNER_BOSS);
+            }
         }
         int elapsedSec = getElapsedSeconds();
         GameData.RhythmStage stage = GameData.RhythmStage.forElapsedSeconds(elapsedSec);
@@ -623,20 +610,7 @@ public final class GamePanel extends JPanel
             zoomKick = Math.min(0.16, zoomKick + 0.08);
             triggerScreenFlash(new Color(85, 235, 255, 85), 10);
             triggerHypeCallout("STAGE " + stageNumber + "!");
-            spawnBeatFormation(Math.min(5, 2 + stageNumber));
-        }
-        int newDay = 1 + Math.min(2, elapsedSec / GameData.DAY_CYCLE_SECONDS);
-        if (newDay != currentDay) {
-            startDay(newDay);
-        }
-        int secInDay = elapsedSec % GameData.DAY_CYCLE_SECONDS;
-        if (!raidActive && secInDay >= GameData.DAYLIGHT_SECONDS) {
-            startRaidPhase();
-        }
-        if (raidActive) {
-            nightAlpha = Math.min(1f, nightAlpha + 0.005f);
-        } else {
-            nightAlpha = Math.max(0f, nightAlpha - 0.006f);
+            spawnBeatFormation(Math.min(6, 3 + stageNumber));
         }
         if (bossTimer > 0 && --bossTimer == 0) {
             spawnBoss();
@@ -678,140 +652,17 @@ public final class GamePanel extends JPanel
         }
     }
 
-    private void startDay(int dayNumber) {
-        currentDay = dayNumber;
-        raidActive = false;
-        spawnOuterSupplyChests(3);
-        AssetLoader.playSound("wave");
-        if (dayNumber >= 3) {
-            showBanner("FINAL DAY " + dayNumber + " - DAWN", "Last Daylight: prepare your camp & squad for the final night!", BANNER_WAVE);
-        } else {
-            showBanner("DAY " + dayNumber + " - DAWN", "Daylight (62s): scavenge chests & upgrade at camp [B]", BANNER_WAVE);
-        }
-    }
-
-    private void startRaidPhase() {
-        raidActive = true;
-        bossTimer = BOSS_WARNING_TICKS;
-        AssetLoader.playSound("wave");
-        showBanner("DAY " + currentDay + " - NIGHTFALL", "Night raid & Apex Mutant incoming - hold out for 38s!", BANNER_BOSS);
-        int raiders = 0;
-        int limit = 5 + currentDay * 3;
-        for (Monster m : monsters) {
-            if (m.isAlive()) {
-                m.setRaiding(true);
-                if (++raiders >= limit) {
-                    break;
-                }
-            }
-        }
-    }
-
-    private void spawnOuterSupplyChests(int desiredAdd) {
-        int currentChests = 0;
-        for (DroppedItem d : drops) {
-            if (d.getType() == GameData.ItemType.CHEST) {
-                currentChests++;
-            }
-        }
-        int toSpawn = Math.min(desiredAdd, Math.max(0, 5 - currentChests));
-        for (int i = 0; i < toSpawn; i++) {
-            Point p = map.randomOuterLootPoint(rng);
-            DroppedItem chest = new DroppedItem(GameData.ItemType.CHEST, 1, p.x, p.y, player);
-            chest.setMap(map);
-            drops.add(chest);
-        }
-    }
-
-    /** Active camp defenses & facilities: mobile NPC allies, guard posts, medical tent regen, and supply depot. */
+    /** Pure rhythm corridor mode: survival camp/allies/supply systems are disabled. */
     private void updateBaseSystems() {
-        int turretLv = player.getLevel(GameData.RecipeKind.BASE_TURRET);
-        int wallLv = player.getLevel(GameData.RecipeKind.BASE_WALL);
-        int medicLv = player.getLevel(GameData.RecipeKind.BASE_MEDIC);
-        int farmLv = player.getLevel(GameData.RecipeKind.BASE_FARM);
-        if (map.applyBaseUpgrades(turretLv, wallLv, medicLv, farmLv)) {
-            solidRects.clear();
-            solidRects.addAll(map.getSolidRects());
-        }
-
-        if (Math.hypot(player.getX() - lastPlayerX, player.getY() - lastPlayerY) > 0.5 || mouseFiring || autoFire) {
-            idlePlayerTicks = 0;
-        } else {
-            idlePlayerTicks++;
-        }
         lastPlayerX = player.getX();
         lastPlayerY = player.getY();
-
-        int desiredAllies = Math.min(5, 1 + turretLv);
-        while (allies.size() < desiredAllies) {
-            allies.add(new AllyNpc(allies.size(), player.getX(), player.getY()));
-        }
-        boolean allowNpcFire = frame != null || idlePlayerTicks < 180;
-        for (AllyNpc a : allies) {
-            a.update(turretLv, allowNpcFire);
-        }
-
-        if (turretLv > 0 && tickCount % Math.max(12, 32 - turretLv * 5) == 0 && bullets.size() < 320) {
-            double maxRange = 220.0 + turretLv * 20.0;
-            for (Point gp : map.getGuardPosts()) {
-                Monster best = null;
-                double bestDist = maxRange;
-                for (Monster m : monsters) {
-                    if (!m.isAlive()) {
-                        continue;
-                    }
-                    double d = Math.hypot(m.getX() - gp.x, m.getY() - gp.y);
-                    if (d < bestDist && map.hasClearPath(gp.x, gp.y, m.getX(), m.getY(), 4)) {
-                        bestDist = d;
-                        best = m;
-                    }
-                }
-                if (best != null) {
-                    double angle = Math.atan2(best.getY() - gp.y, best.getX() - gp.x);
-                    Bullet shot = Bullet.shot(gp.x, gp.y - 6, angle, GameData.WeaponType.RIFLE, 10 + turretLv * 5);
-                    shot.setMap(map);
-                    bullets.add(shot);
-                    addEffect(new Effect(Effect.Kind.IMPACT, gp.x + Math.cos(angle) * 10, gp.y - 6 + Math.sin(angle) * 10, 10, null, null, 14));
-                }
-            }
-        }
-
-        if (medicLv > 0 && player.isAlive() && tickCount % 75 == 0
-                && map.getCampArea().contains((int) player.getX(), (int) player.getY())) {
-            boolean wasPoisoned = player.isPoisoned();
-            int before = player.getHp();
-            player.heal(2 + medicLv * 2);
-            player.curePoison();
-            int gained = player.getHp() - before;
-            if (gained > 0 || wasPoisoned) {
-                addText(player.getX(), player.getY() - 24, gained > 0 ? "+" + gained + " Med Tent" : "Cured!", TEXT_LOOT);
-            }
-        }
-
-        if (farmLv > 0 && tickCount % Math.max(540, 1080 - farmLv * 180) == 0 && drops.size() < 200) {
-            Rectangle camp = map.getCampArea();
-            double sx = camp.x + camp.width - 72;
-            double sy = camp.y + 84;
-            int count = farmLv >= 3 ? 2 : 1;
-            for (int i = 0; i < count; i++) {
-                int roll = rng.nextInt(10);
-                GameData.ItemType itemType = roll < 5 ? GameData.ItemType.AMMO
-                        : (roll < 8 ? GameData.ItemType.FOOD : GameData.ItemType.MEDKIT);
-                int amount = itemType == GameData.ItemType.AMMO ? 12 + farmLv * 4 : 1;
-                DroppedItem sup = new DroppedItem(itemType, amount, sx, sy, player);
-                sup.setMap(map);
-                sup.scatter(rng);
-                drops.add(sup);
-            }
-            addText(sx, sy - 14, "+Base Supply", TEXT_LOOT);
-        }
     }
 
     // ------------------------------------------------------------------ spawning
     private void spawnPendingMonsters() {
         int maxAllowed = settings.doubleSpawn
                 ? GameData.MAX_LIVE_MONSTERS
-                : (raidActive ? (18 + currentDay * 5 + getDifficulty() * 3) : (12 + currentDay * 4 + getDifficulty() * 2));
+                : (14 + stageNumber * 4 + getDifficulty() * 2);
         int room = maxAllowed - getLiveMonsterCount();
         if (room <= 0) {
             pendingSpawns.set(0);   // the arena is full: forget extra requests so they do not pour in later
@@ -824,26 +675,18 @@ public final class GamePanel extends JPanel
         pendingSpawns.addAndGet(-count);
     }
 
-    /** New monsters spawn along upcoming patrol segments or map borders and aggressively chase the runner. */
+    /** New monsters spawn ahead in one of the 4 vertical highway lanes and march straight down toward the runner. */
     private Monster spawnMonster(GameData.MonsterType type) {
         return spawnMonsterNear(type, null);
     }
 
     private Monster spawnMonsterNear(GameData.MonsterType type, Point preferred) {
-        boolean boss = type == GameData.MonsterType.ZOMBIE_BOSS;
         Point p = preferred;
-        int wpCount = map.getWaypointCount();
-        if (p == null && !boss && wpCount > 0 && rng.nextBoolean()) {
-            Point ahead = map.getWaypoint((waypointIndex + rng.nextInt(2)) % wpCount);
-            int cx = ahead.x + rng.nextInt(121) - 60;
-            int cy = ahead.y + rng.nextInt(121) - 60;
-            Rectangle feet = new Rectangle(cx - type.hitboxW / 2, cy, type.hitboxW, 8);
-            if (!map.isBlocked(feet) && player.distanceTo(cx, cy) > 95.0) {
-                p = new Point(cx, cy);
-            }
-        }
         if (p == null) {
-            p = map.randomSpawnPoint(rng, getCameraView());
+            int lane = rng.nextInt(4);
+            int sx = (int) Math.round(map.getLaneX(lane)) + rng.nextInt(19) - 9;
+            int sy = (int) Math.round(player.getY() - (220 + rng.nextInt(95)));
+            p = new Point(sx, sy);
         }
         Monster m = new Monster(type, p.x, p.y, map, player, GameData.monsterHpScale(wave, getDifficulty()));
         m.setRaiding(true);
@@ -851,36 +694,40 @@ public final class GamePanel extends JPanel
         return m;
     }
 
-    /** Keeps active rhythm targets right ahead along the runner's corridor so every beat has action. */
+    /** Keeps active rhythm targets marching straight down the vertical corridor ahead of the player. */
     private void ensureForwardBeatTargets() {
         if (!player.isAlive()) {
             return;
         }
-        int near = 0;
+        double py = player.getY();
         for (Monster m : monsters) {
-            if (m.isAlive() && player.distanceTo(m) <= 320.0) {
-                near++;
+            if (m.isAlive() && m.getY() > py + 130 && m.getType() == GameData.MonsterType.ZOMBIE_BOSS) {
+                m.shiftY((py - 250) - m.getY());
             }
         }
-        int desired = Math.min(6, 3 + stageNumber);
-        if (near < desired) {
-            spawnBeatFormation(Math.min(3, desired - near));
+        monsters.removeIf(m -> m.isAlive() && m.getY() > py + 130 && m.getType() != GameData.MonsterType.ZOMBIE_BOSS);
+        int aheadCount = 0;
+        for (Monster m : monsters) {
+            if (m.isAlive() && m.getY() <= py + 30 && m.getY() >= py - 380) {
+                aheadCount++;
+            }
+        }
+        int desired = Math.min(8, 4 + stageNumber);
+        if (aheadCount < desired) {
+            spawnBeatFormation(Math.min(4, desired - aheadCount));
         }
     }
 
-    /** Spawns a choreographed beat formation along the upcoming auto-run route with varied beat-note roles. */
+    /** Spawns a choreographed beat formation across the 4 vertical lanes ahead of the runner. */
     private void spawnBeatFormation(int count) {
-        int wpCount = Math.max(1, map.getWaypointCount());
-        Point ahead = map.getWaypoint(waypointIndex % wpCount);
-        double baseAngle = Math.atan2(ahead.y - player.getY(), ahead.x - player.getX());
         int live = getLiveMonsterCount();
-        int cap = settings.doubleSpawn ? GameData.MAX_LIVE_MONSTERS : (20 + stageNumber * 4);
+        int cap = settings.doubleSpawn ? GameData.MAX_LIVE_MONSTERS : (22 + stageNumber * 4);
         int toSpawn = Math.min(count, Math.max(0, cap - live));
+        int startLane = rng.nextInt(4);
         for (int i = 0; i < toSpawn; i++) {
-            double dist = 95.0 + i * 32.0 + rng.nextInt(25);
-            double lateral = (i - (toSpawn - 1) / 2.0) * 0.28 + (rng.nextDouble() - 0.5) * 0.14;
-            int cx = (int) Math.round(player.getX() + Math.cos(baseAngle + lateral) * dist);
-            int cy = (int) Math.round(player.getY() + Math.sin(baseAngle + lateral) * dist);
+            int lane = (startLane + i) % 4;
+            int cx = (int) Math.round(map.getLaneX(lane)) + rng.nextInt(15) - 7;
+            int cy = (int) Math.round(player.getY() - (215 + i * 44 + rng.nextInt(16)));
             GameData.MonsterType type;
             GameData.BeatNoteKind role;
             if (i % 3 == 1) {
@@ -893,9 +740,7 @@ public final class GamePanel extends JPanel
                 type = GameData.MonsterType.randomForWave(wave, rng);
                 role = null;
             }
-            Rectangle feet = new Rectangle(cx - type.hitboxW / 2, cy, type.hitboxW, 8);
-            Point spot = !map.isBlocked(feet) ? new Point(cx, cy) : null;
-            Monster m = spawnMonsterNear(type, spot);
+            Monster m = spawnMonsterNear(type, new Point(cx, cy));
             if (role != null) {
                 m.setNoteKind(role);
             }
@@ -944,8 +789,8 @@ public final class GamePanel extends JPanel
             boolean fullLock = spaceAimTarget;
             spaceAimTarget = false;
             Monster lock = findHybridBeatTarget(aimX, aimY, fullLock);
-            double tx = lock != null ? lock.getX() : aimX;
-            double ty = lock != null ? lock.getY() : aimY;
+            double tx = lock != null ? lock.getX() : (fullLock ? player.getX() : aimX);
+            double ty = lock != null ? lock.getY() : (fullLock ? player.getY() - 180 : aimY);
             player.setAim(tx, ty);
             fireRhythmAt(tx, ty, lock);
         } else {
@@ -969,16 +814,6 @@ public final class GamePanel extends JPanel
     }
 
     private void updateAutoRunMovement(double prevX, double prevY) {
-        int wpCount = Math.max(1, map.getWaypointCount());
-        Point wp = map.getWaypoint(waypointIndex);
-        if (Math.hypot(wp.x - player.getX(), wp.y - player.getY()) < 26.0) {
-            int finished = waypointIndex;
-            waypointIndex = (waypointIndex + 1) % wpCount;
-            if (finished == wpCount - 1) {
-                onLapCompleted();
-            }
-            wp = map.getWaypoint(waypointIndex);
-        }
         if (dashTicks > 0) {
             dashTicks--;
             double dashSpeed = player.getMoveSpeed() * 2.6;
@@ -986,29 +821,19 @@ public final class GamePanel extends JPanel
             addEffect(new Effect(Effect.Kind.AFTERIMAGE, player.getX(), player.getFeetY() - 8,
                     0, 0, 0, 0, 10, null,
                     isFeverActive() ? new Color(255, 220, 60, 180) : new Color(110, 245, 255, 165), 13));
+            if (player.getY() < 260) {
+                wrapVerticalWorld(map.getHeightPx());
+            }
             return;
         }
-        double angle = map.hasClearPath(player.getX(), player.getY(), wp.x, wp.y, player.getWidth())
-                ? Math.atan2(wp.y - player.getY(), wp.x - player.getX())
-                : map.getChaseAngle(player.getX(), player.getY(), wp.x, wp.y, player.getWidth());
-
         int manualX = (keyRight ? 1 : 0) - (keyLeft ? 1 : 0);
         int manualY = (keyDown ? 1 : 0) - (keyUp ? 1 : 0);
-        double vx = Math.cos(angle) + manualX * 0.72;
-        double vy = Math.sin(angle) + manualY * 0.72;
-        double len = Math.hypot(vx, vy);
-        double speed = player.getMoveSpeed() * (isFeverActive() ? 1.25 : 1.0);
-        if (len > 0.01) {
-            player.moveAutoRun(vx / len * speed, vy / len * speed);
-        }
-        if (Math.hypot(player.getX() - prevX, player.getY() - prevY) < 0.25) {
-            stuckTicks++;
-            if (stuckTicks > 40) {
-                waypointIndex = (waypointIndex + 1) % wpCount;
-                stuckTicks = 0;
-            }
-        } else {
-            stuckTicks = 0;
+        double baseSpeed = player.getMoveSpeed() * (isFeverActive() ? 1.12 : 0.92);
+        double dx = manualX * player.getMoveSpeed() * 1.25;
+        double dy = Math.min(-baseSpeed * 0.45, -baseSpeed + manualY * player.getMoveSpeed() * 0.55);
+        player.moveAutoRun(dx, dy);
+        if (player.getY() < 260) {
+            wrapVerticalWorld(map.getHeightPx());
         }
         if (elapsedTicks % (isFeverActive() ? 4 : 8) == 0) {
             addEffect(new Effect(Effect.Kind.AFTERIMAGE, player.getX(), player.getFeetY() - 8,
@@ -1018,21 +843,22 @@ public final class GamePanel extends JPanel
         }
     }
 
-    private void onLapCompleted() {
+    /** Wraps all world entities and camera seamlessly down by one map height so the highway continues forever. */
+    private void wrapVerticalWorld(int shiftY) {
+        player.shiftY(shiftY);
+        lastPlayerY += shiftY;
+        camY += shiftY;
+        for (Monster m : monsters) {
+            m.shiftY(shiftY);
+        }
+        for (Bullet b : bullets) {
+            b.shiftY(shiftY);
+        }
+        for (Effect fx : effects) {
+            fx.y += shiftY;
+            fx.y2 += shiftY;
+        }
         lapsCompleted++;
-        int healBefore = player.getHp();
-        player.heal(25);
-        int gainedHp = player.getHp() - healBefore;
-        player.addInventory(GameData.ItemType.AMMO, 25);
-        player.addInventory(GameData.ItemType.SCRAPS, 3);
-        rhythmBonusScore += 250 * (1 + lapsCompleted);
-        AssetLoader.playSound("wave");
-        shake(5.5, 16);
-        zoomKick = Math.min(0.14, zoomKick + 0.06);
-        triggerScreenFlash(new Color(80, 240, 180, 75), 10);
-        spawnShockwaveAndSparks(player.getX(), player.getY(), new Color(90, 245, 180), 42, 16);
-        String msg = "+" + gainedHp + " HP / +25 AMMO / +3 SCRAPS";
-        showBanner("LAP " + lapsCompleted + " COMPLETE!", msg, BANNER_WAVE);
     }
 
     /** Key presses that change the world are only remembered by the Swing thread and done here. */
@@ -1044,8 +870,6 @@ public final class GamePanel extends JPanel
                 GameData.WeaponType w = GameData.HOTBAR_WEAPONS[slot];
                 if (player.ownsWeapon(w)) {
                     player.switchWeapon(w);
-                } else {
-                    player.showHint("Craft the " + w.displayName + " at Base Camp [B]");
                 }
             }
         }
@@ -1060,19 +884,6 @@ public final class GamePanel extends JPanel
             if (grenade != null) {
                 bullets.add(grenade);
             }
-        }
-        if (medkitRequested) {
-            medkitRequested = false;
-            useMedkit();
-        }
-    }
-
-    private void useMedkit() {
-        int before = player.getHp();
-        if (player.useMedkit()) {
-            addText(player.getX(), player.getY() - 22, "+" + (player.getHp() - before) + " HP", TEXT_LOOT);
-        } else if (player.getHp() >= player.getMaxHp()) {
-            player.showHint("Health is already full");
         }
     }
 
@@ -1151,7 +962,7 @@ public final class GamePanel extends JPanel
         return best;
     }
 
-    /** Beat Dash Parry (Shift / Right-Click): i-frame burst that reflects shots and restores ammo on beat. */
+    /** Beat Dash Parry (Shift / Right-Click): i-frame burst that reflects shots and heals +6 HP on beat. */
     private void triggerBeatDash(double aimX, double aimY) {
         if (dashCooldown > 0) {
             return;
@@ -1166,13 +977,12 @@ public final class GamePanel extends JPanel
             dx = aimX - player.getX();
             dy = aimY - player.getY();
         } else {
-            Point wp = map.getWaypoint(waypointIndex % Math.max(1, map.getWaypointCount()));
-            dx = wp.x - player.getX();
-            dy = wp.y - player.getY();
+            dx = 0;
+            dy = -1;
         }
         double len = Math.hypot(dx, dy);
-        dashVx = len > 0.01 ? dx / len : 1.0;
-        dashVy = len > 0.01 ? dy / len : 0.0;
+        dashVx = len > 0.01 ? dx / len : 0.0;
+        dashVy = len > 0.01 ? dy / len : -1.0;
         dashTicks = 10;
         dashCooldown = 16;
         player.grantInvulnerability(14);
@@ -1189,7 +999,7 @@ public final class GamePanel extends JPanel
             if (!fever) {
                 feverCharge = Math.min(GameData.FEVER_MAX, feverCharge + 14);
             }
-            player.addInventory(GameData.ItemType.AMMO, 8);
+            player.heal(6);
             AssetLoader.playSound("beat_dash");
 
             int deflected = 0;
@@ -1217,7 +1027,7 @@ public final class GamePanel extends JPanel
             zoomKick = Math.min(0.16, zoomKick + 0.05);
             triggerScreenFlash(new Color(85, 245, 255, 75), 7);
             spawnShockwaveAndSparks(player.getX(), player.getY(), new Color(90, 245, 255), 85, 18);
-            addText(player.getX(), player.getY() - 32, (deflected > 0 ? "REFLECT " : "PARRY ") + "+8 AMMO",
+            addText(player.getX(), player.getY() - 32, (deflected > 0 ? "REFLECT " : "PARRY ") + "+6 HP!",
                     new Color(90, 245, 255));
             if (!fever && feverCharge >= GameData.FEVER_MAX) {
                 activateFeverOverdrive();
@@ -1492,12 +1302,15 @@ public final class GamePanel extends JPanel
         monsters.removeIf(Monster::isRemovable);
     }
 
-    /** Score, loot, shockwave, sparks, and heavy kill shake. */
+    /** Score, rhythm healing sustain, shockwave, sparks, and heavy kill shake. */
     private void onMonsterKilled(Monster m) {
         kills++;
         int mult = getComboMultiplier() * (isFeverActive() ? 2 : 1);
         killScore += m.getType().score * mult;
-        drops.addAll(m.rollDrops(rng, player.getLootBonus()));
+        if (kills % 4 == 0 && player.getHp() < player.getMaxHp()) {
+            player.heal(2);
+            player.curePoison();
+        }
         if (!isFeverActive()) {
             feverCharge = Math.min(GameData.FEVER_MAX, feverCharge + 6);
             if (feverCharge >= GameData.FEVER_MAX) {
@@ -1514,7 +1327,9 @@ public final class GamePanel extends JPanel
         spawnShockwaveAndSparks(m.getX(), m.getY(), boss ? new Color(255, 220, 60) : new Color(255, 130, 55),
                 boss ? 56 : 26, boss ? 30 : 14);
         if (boss) {
-            showBanner("BOSS DOWN!", "MASSIVE BEAT BONUS + SUPPLY CHEST", BANNER_WAVE);
+            rhythmBonusScore += 500;
+            player.heal(15);
+            showBanner("BOSS DOWN!", "MASSIVE BEAT BONUS +500 / +15 HP!", BANNER_WAVE);
         }
     }
 
@@ -1677,14 +1492,12 @@ public final class GamePanel extends JPanel
         banner = new Banner(title, subtitle, color, tickCount, 115);
     }
 
-    /**
-     * The camera glides after the player (follow = share of the distance covered per tick, 1 = jump
-     * there) and never shows anything outside the map.
-     */
+    /** Keeps the vertical highway centered and places the runner in the lower third looking North ahead. */
     private void updateCamera(double follow) {
         double viewW = getViewWidth() / (double) SCALE, viewH = getViewHeight() / (double) SCALE;
-        double targetX = clamp(player.getX() - viewW / 2, map.getWidthPx() - viewW);
-        double targetY = clamp(player.getY() - viewH / 2, map.getHeightPx() - viewH);
+        double targetX = map.getHighwayCenterX() - viewW / 2.0 + (player.getX() - map.getHighwayCenterX()) * 0.22;
+        targetX = clamp(targetX, map.getWidthPx() - viewW);
+        double targetY = player.getY() - viewH * 0.70;
         camX += (targetX - camX) * follow;
         camY += (targetY - camY) * follow;
     }
@@ -2012,12 +1825,6 @@ public final class GamePanel extends JPanel
             case KeyEvent.VK_G:
                 grenadeRequested = true;
                 break;
-            case KeyEvent.VK_E:
-                medkitRequested = true;
-                break;
-            case KeyEvent.VK_B:
-                openWorkshop();
-                break;
             case KeyEvent.VK_P:
             case KeyEvent.VK_ESCAPE:
                 togglePause();
@@ -2186,9 +1993,7 @@ public final class GamePanel extends JPanel
         g2.scale(SCALE, SCALE);
 
         map.drawGround(g2, view);
-        drawCampPerimeter(g2, view);
         drawNeonBeatFloor(g2, view);
-        drawAutoRunTrack(g2, view);
         double beatPhase = getBeatPhase();
         boolean perfectWin = isInPerfectWindow();
         for (Monster m : monsters) {
@@ -2208,12 +2013,44 @@ public final class GamePanel extends JPanel
         g2.setTransform(old);
     }
 
-    /** Concentric 125 BPM beat aura under the runner plus neon floor chevrons along the highway. */
+    /** Concentric 125 BPM beat aura under the runner plus 4-lane vertical neon highway beat bars. */
     private void drawNeonBeatFloor(Graphics2D g2, Rectangle view) {
         Stroke oldStroke = g2.getStroke();
         boolean fever = isFeverActive();
         boolean perfect = isInPerfectWindow();
         double beat = 1.0 - getBeatPhase();
+        int leftX = (int) Math.round(map.getHighwayLeftX());
+        int rightX = (int) Math.round(map.getHighwayRightX());
+        int yTop = view.y;
+        int yBot = view.y + view.height;
+
+        // Vertical lane guide rails pulsing to 125 BPM
+        Color railCol = fever ? new Color(255, 220, 60, perfect ? 145 : 75)
+                : new Color(65, 230, 255, perfect ? 130 : 65);
+        g2.setColor(railCol);
+        g2.setStroke(new BasicStroke(perfect ? 2.0f : 1.2f));
+        g2.drawLine(leftX + 2, yTop, leftX + 2, yBot);
+        g2.drawLine(rightX - 2, yTop, rightX - 2, yBot);
+
+        g2.setColor(fever ? new Color(255, 110, 210, 55) : new Color(75, 225, 255, 42));
+        g2.setStroke(new BasicStroke(1.0f));
+        for (int s = 1; s <= 3; s++) {
+            int divX = leftX + s * 96;
+            g2.drawLine(divX, yTop, divX, yBot);
+        }
+
+        // Horizontal scrolling beat bars moving vertically down the corridor toward the player
+        int spacing = 96;
+        int offset = (int) Math.round((1.0 - getBeatPhase()) * spacing);
+        int startBar = Math.floorDiv(yTop, spacing) * spacing + offset;
+        g2.setColor(fever ? new Color(255, 215, 65, perfect ? 95 : 42) : new Color(75, 235, 255, perfect ? 85 : 35));
+        for (int by = startBar - spacing; by <= yBot; by += spacing) {
+            if (by >= yTop) {
+                g2.drawLine(leftX + 4, by, rightX - 4, by);
+            }
+        }
+
+        // Player feet beat aura & forward lane strike chevrons
         int px = (int) Math.round(player.getX());
         int py = (int) Math.round(player.getFeetY() - 2);
         if (view.contains(px, py)) {
@@ -2227,39 +2064,19 @@ public final class GamePanel extends JPanel
             g2.setColor(fever ? new Color(255, 110, 210, 140) : new Color(180, 250, 255, 115));
             g2.setStroke(new BasicStroke(1.1f));
             g2.drawOval(px - innerR, py - innerR / 2, innerR * 2, innerR);
-        }
-        int wpCount = map.getWaypointCount();
-        if (wpCount > 0) {
-            double sx = player.getX(), sy = player.getFeetY() - 2;
-            Color chevCol = fever ? new Color(255, 220, 65, 145) : new Color(75, 235, 255, 125);
+
+            // Forward Northward neon lane arrows
+            Color chevCol = fever ? new Color(255, 220, 65, 150) : new Color(75, 235, 255, 130);
             g2.setColor(chevCol);
-            g2.setStroke(new BasicStroke(1.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             double scroll = (elapsedTicks * 0.04) % 1.0;
-            for (int seg = 0; seg < Math.min(2, wpCount); seg++) {
-                Point wp = map.getWaypoint((waypointIndex + seg) % wpCount);
-                double dx = wp.x - sx, dy = wp.y - sy;
-                double dist = Math.hypot(dx, dy);
-                if (dist > 28 && view.intersectsLine(sx, sy, wp.x, wp.y)) {
-                    double ang = Math.atan2(dy, dx);
-                    double leftA = ang + 2.45, rightA = ang - 2.45;
-                    for (int c = 0; c < 3; c++) {
-                        double t = ((c / 3.0) + scroll) % 1.0;
-                        int cx = (int) Math.round(sx + dx * t);
-                        int cy = (int) Math.round(sy + dy * t);
-                        if (view.contains(cx, cy)) {
-                            g2.drawLine(cx, cy, (int) Math.round(cx + Math.cos(leftA) * 7),
-                                    (int) Math.round(cy + Math.sin(leftA) * 5));
-                            g2.drawLine(cx, cy, (int) Math.round(cx + Math.cos(rightA) * 7),
-                                    (int) Math.round(cy + Math.sin(rightA) * 5));
-                        }
-                    }
+            for (int c = 0; c < 3; c++) {
+                double t = ((c / 3.0) + scroll) % 1.0;
+                int cy = (int) Math.round(py - 28 - t * 140);
+                if (view.contains(px, cy)) {
+                    g2.drawLine(px, cy, px - 8, cy + 6);
+                    g2.drawLine(px, cy, px + 8, cy + 6);
                 }
-                if (view.contains(wp.x, wp.y)) {
-                    g2.drawPolygon(new int[]{wp.x, wp.x + 6, wp.x, wp.x - 6},
-                            new int[]{wp.y - 4, wp.y, wp.y + 4, wp.y}, 4);
-                }
-                sx = wp.x;
-                sy = wp.y;
             }
         }
         g2.setStroke(oldStroke);
@@ -2410,18 +2227,8 @@ public final class GamePanel extends JPanel
         return (int) Math.round((unzoomed - getViewHeight() / 2.0) * currentZoom + getViewHeight() / 2.0);
     }
 
-    /** Damage numbers, rhythm judgments, pickup labels, and base NPC prompts in sharp screen pixels. */
+    /** Damage numbers and rhythm timing callouts in sharp screen pixels. */
     private void drawFloatingTexts(Graphics2D g2) {
-        Point trader = map.getTraderPosition();
-        if (!gameOver && player.distanceTo(trader.x, trader.y) < 125) {
-            String prompt = "PRESS B - CAMP NPC";
-            int pw = Theme.pixelWidth(prompt, 2) + 16;
-            int ph = 20;
-            int tx = worldToScreenX(trader.x) - pw / 2;
-            int ty = Math.max(8, worldToScreenY(trader.y - 26));
-            Theme.paintPanel(g2, Theme.Panel.GLASS, tx, ty, pw, ph, 1);
-            Theme.drawPixelTextShadow(g2, prompt, tx + 8, ty + 5, 2, Theme.GOLD);
-        }
         Composite old = g2.getComposite();
         for (Effect e : effects) {
             if (e.kind != Effect.Kind.TEXT) {
@@ -2437,14 +2244,12 @@ public final class GamePanel extends JPanel
         g2.setComposite(old);
     }
 
-    /** Everything that sits on the glass in front of the world. */
+    /** Everything that sits on the glass in front of the world (pure Rhythm HUD, no survival minimap or darkness). */
     private void drawOverlay(Graphics2D g2) {
-        drawNightLighting(g2);
         drawDangerTint(g2);
         drawScreenFlash(g2);
         drawFeverBorder(g2);
         drawBanner(g2);
-        drawMiniMap(g2);
         if (gameOver) {
             drawGameOverScreen(g2);
             return;
@@ -2852,10 +2657,9 @@ public final class GamePanel extends JPanel
         g.setColor(SCRIM);
         g.fillRect(0, 0, w, h);
         String[][] controls = {
-            {"Dodge / Strafe", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
-            {"Parry Dash (Beat)", "shift", "mouse_right"}, {"Grenade", "g"},
-            {"Medkit", "e"}, {"Switch weapon (1-7)", "mouse_mid"},
-            {"Upgrade Shop", "b"}, {"Resume", "p", "esc"}
+            {"Strafe Lanes / Speed", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
+            {"Parry Dash (+6 HP)", "shift", "mouse_right"}, {"Grenade", "g"},
+            {"Switch weapon (1-7)", "mouse_mid"}, {"Resume", "p", "esc"}
         };
         BufferedImage title = Theme.kit("titles/paused", 2);
         int rowH = 40, rows = (controls.length + 1) / 2;

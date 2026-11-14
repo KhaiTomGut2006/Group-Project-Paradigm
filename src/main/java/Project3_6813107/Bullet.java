@@ -55,7 +55,8 @@ public final class Bullet extends Entity {
     private final int maxLife;
 
     // grenade: flies in an arc to a target point and explodes there
-    private final double targetX, targetY;
+    private final double targetX;
+    private double targetY;
     private double height;
 
     private Bullet(GameData.Projectile kind, double x, double y, double angle, double speed, int damage,
@@ -164,6 +165,12 @@ public final class Bullet extends Entity {
         } else if (travelled >= maxRange) {
             end(explosive);
         }
+    }
+
+    @Override
+    public void shiftY(double dy) {
+        super.shiftY(dy);
+        this.targetY += dy;
     }
 
     /** Stops the bullet; an explosive one leaves an explosion for GamePanel to pick up. */
