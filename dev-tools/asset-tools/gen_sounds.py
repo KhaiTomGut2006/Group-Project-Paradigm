@@ -327,6 +327,40 @@ write("fever", fever_activate(), gain=0.95)
 write("off_beat", concat_notes([155, 130], tri, 0.055, cut=900), gain=0.55)
 
 
+def double_beat():
+    # Twin bright synth-pluck chord (523Hz -> 784Hz) + crisp transient click for 8th-note Double-Beat hits
+    click = gunshot(0.08, 420, 120, 6500, 1600, body=0.45, tail=0.22, crack=0.6)
+    n1 = mix(sweep_tone(0.09, 523.25, 523.25, lambda p: square(p, 0.3), a=0.002, d=0.03, s=0.4, r=0.03, cut=7500),
+             sweep_tone(0.09, 659.25, 659.25, tri, a=0.002, d=0.03, s=0.4, r=0.03, cut=7500))
+    n2 = mix(sweep_tone(0.14, 783.99, 783.99, lambda p: square(p, 0.25), a=0.002, d=0.04, s=0.5, r=0.06, cut=8500),
+             sweep_tone(0.14, 1046.5, 1046.5, tri, a=0.002, d=0.04, s=0.5, r=0.06, cut=8500))
+    return mix(click, n1, [0.0] * n(0.055) + n2)
+
+
+def finisher_boom():
+    # Heavy sub-drop + metallic shatter + power chord for 3-2-1 STRIKE! Finisher explosions
+    drop = sweep_tone(0.45, 160, 42, math.sin if False else tri, a=0.003, d=0.12, s=0.6, r=0.2, cut=600)
+    shatter = gunshot(0.32, 900, 180, 9000, 1200, body=0.7, tail=0.5, crack=1.0)
+    chord = mix(
+        sweep_tone(0.50, 440, 440, lambda p: square(p, 0.4), a=0.005, d=0.08, s=0.65, r=0.2, cut=6500),
+        sweep_tone(0.50, 659.25, 659.25, lambda p: square(p, 0.4), a=0.005, d=0.08, s=0.65, r=0.2, cut=6500),
+        sweep_tone(0.50, 880, 880, tri, a=0.005, d=0.08, s=0.65, r=0.2, cut=6500),
+    )
+    return mix(drop, shatter, [0.0] * n(0.02) + chord)
+
+
+def beat_dash():
+    # Electric whoosh + rising zap for Beat Dash Parry
+    zap = sweep_tone(0.18, 320, 1280, lambda p: square(p, 0.25), a=0.002, d=0.04, s=0.55, r=0.08, cut=7500)
+    whoosh = gunshot(0.16, 1200, 450, 7500, 1800, body=0.2, tail=0.45, crack=0.2)
+    return mix(zap, whoosh)
+
+
+write("double_beat", double_beat(), gain=0.88)
+write("finisher_boom", finisher_boom(), gain=0.95)
+write("beat_dash", beat_dash(), gain=0.82)
+
+
 # ---------------------------------------------------------------- BGM (seamless loop)
 BPM = 125
 BEAT = 60.0 / BPM                # 0.48 s per beat = exact 30 simulation ticks at 16 ms/tick
@@ -381,38 +415,46 @@ for bar, root in enumerate(roots):
     for m in pads[bar]:
         add_circular(at(base), note_samples(midi(m), BEAT * 4.1, "tri", 1500, a=0.25, d=0.4, s=0.65, r=0.6), 0.08)
 
-# lead arpeggio across all 8 bars so the rhythm groove stays energetic
+# lead arpeggio across all 8 bars + rising 4-beat end-of-bar fill cuing 3-2-1 STRIKE! finishers
 arp = [69, 72, 76, 72, 69, 72, 76, 79]
+fill_notes = [76, 79, 81, 84]
 for bar in range(8):
     shift = pads[bar][0] - 57
-    gain_arp = 0.07 if bar < 4 else 0.11
-    cut_arp = 2200 if bar < 4 else 3400
+    gain_arp = 0.085 if bar < 4 else 0.13
+    cut_arp = 2600 if bar < 4 else 3800
     for k, m in enumerate(arp):
         add_circular(at(bar * 4 + k * 0.5), note_samples(midi(m + shift + 12), BEAT * 0.28, "pulse", cut_arp, a=0.002, d=0.04, s=0.45, r=0.06), gain_arp)
+    # rising synth fill on beats 3.0, 3.25, 3.5, 3.75 of every bar
+    for fk, fm in enumerate(fill_notes):
+        add_circular(at(bar * 4 + 3.0 + fk * 0.25), note_samples(midi(fm + shift), BEAT * 0.22, "saw", 3400, a=0.002, d=0.03, s=0.4, r=0.04), 0.11)
 
-# drums: four-on-the-floor kick on EVERY beat so the player clearly hears the 125 BPM pulse
+# drums: punchy four-on-the-floor kick + sub-bass every beat, crisp 8th-note accents for Double-Beats
 for beat in range(BEATS):
-    total = n(0.24)
+    total = n(0.25)
     k_out = []
     phase = 0.0
     for i in range(total):
         t = i / total
-        phase += (125 * (0.32 ** t)) / SR
-        click = noise() * math.exp(-i / (SR * 0.005)) * 0.35
-        k_out.append(math.sin(2 * math.pi * phase) * math.exp(-t * 6.5) + click)
-    add_circular(at(beat), k_out, 0.65)
+        phase += (135 * (0.30 ** t)) / SR
+        click = noise() * math.exp(-i / (SR * 0.004)) * 0.42
+        k_out.append(math.sin(2 * math.pi * phase) * math.exp(-t * 6.0) + click)
+    add_circular(at(beat), k_out, 0.72)
     # snare on 2 and 4 (beat % 2 == 1)
     if beat % 2 == 1:
         total = n(0.18)
-        lp = LowPass(4800)
-        s_out = [lp(noise()) * math.exp(-(i / total) * 6.5) + math.sin(2 * math.pi * 200 * i / SR) * math.exp(-(i / total) * 14) * 0.45 for i in range(total)]
-        add_circular(at(beat), s_out, 0.30)
-    # closed hats on every eighth
+        lp = LowPass(5200)
+        s_out = [lp(noise()) * math.exp(-(i / total) * 6.0) + math.sin(2 * math.pi * 210 * i / SR) * math.exp(-(i / total) * 14) * 0.50 for i in range(total)]
+        add_circular(at(beat), s_out, 0.34)
+    # crisp eighth-note hi-hats + off-beat snare ghost click on +0.5 so Double-Beat windows pop clearly
     for half in (0.0, 0.5):
-        total = n(0.05)
-        hp = HighPass(6000)
-        h_out = [hp(noise()) * math.exp(-(i / total) * 8) for i in range(total)]
-        add_circular(at(beat + half), h_out, 0.13 if half else 0.08)
+        total = n(0.055)
+        hp = HighPass(5500)
+        h_out = [hp(noise()) * math.exp(-(i / total) * 7.5) for i in range(total)]
+        add_circular(at(beat + half), h_out, 0.17 if half else 0.09)
+    off_total = n(0.06)
+    off_lp = LowPass(3600)
+    off_out = [off_lp(noise()) * math.exp(-(i / off_total) * 10.0) * 0.35 + math.sin(2 * math.pi * 320 * i / SR) * math.exp(-(i / off_total) * 16) * 0.25 for i in range(off_total)]
+    add_circular(at(beat + 0.5), off_out, 0.22)
 
-write("bgm", buf, gain=0.85, loop=True)
+write("bgm", buf, gain=0.88, loop=True)
 print("ok")

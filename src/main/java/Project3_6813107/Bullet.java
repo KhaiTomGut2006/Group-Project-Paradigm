@@ -250,6 +250,10 @@ public final class Bullet extends Entity {
         return knockback;
     }
 
+    public void deflect() {
+        alive = false;
+    }
+
     public boolean isHostile() {
         return hostile;
     }

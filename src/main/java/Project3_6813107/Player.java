@@ -276,7 +276,7 @@ public final class Player extends Entity {
         }
         swingAngle = angle;
         fireCooldown = (judge == GameData.RhythmJudge.OFF_BEAT)
-                ? getCooldownTicks(w) : Math.min(getCooldownTicks(w), 14);
+                ? getCooldownTicks(w) : Math.min(getCooldownTicks(w), 8);
         AssetLoader.playSound(w.shootSound);
         return out;
     }
@@ -362,6 +362,11 @@ public final class Player extends Entity {
     /** Removes active poison (Medical Tent or Camp Doctor treatment). */
     public void curePoison() {
         poisonTick = 0;
+    }
+
+    /** Grants brief invulnerability frames (used during Beat Dash Parry). */
+    public void grantInvulnerability(int ticks) {
+        invulnerableTick = Math.max(invulnerableTick, ticks);
     }
 
     private void die() {

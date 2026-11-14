@@ -88,6 +88,63 @@ public final class GameData {
         }
     }
 
+    /** Choreographed beat-note roles assigned to monsters on the 125 BPM action highway. */
+    public enum BeatNoteKind {
+        SINGLE_BEAT("BEAT", 1.0, 100),
+        DOUBLE_BEAT("2X RAPID", 1.35, 220),
+        COUNTDOWN_FINISHER("STRIKE!", 2.5, 450),
+        DANGER_PARRY("PARRY!", 1.8, 300);
+
+        public final String tag;
+        public final double scoreMult;
+        public final int bonusPoints;
+
+        BeatNoteKind(String tag, double scoreMult, int bonusPoints) {
+            this.tag = tag;
+            this.scoreMult = scoreMult;
+            this.bonusPoints = bonusPoints;
+        }
+    }
+
+    /** 5 escalating Rhythm Action Stages across the 5-minute run (~60 s each). */
+    public enum RhythmStage {
+        STAGE_1(1, "STAGE 1: NEON OUTPOST", "1-BEAT LOCK ON / WARMUP GROOVE"),
+        STAGE_2(2, "STAGE 2: CROSSFIRE RUSH", "2X RAPID RUNNERS INCOMING!"),
+        STAGE_3(3, "STAGE 3: OVERDRIVE HIGHWAY", "3-2-1 STRIKE FINISHERS ACTIVE!"),
+        STAGE_4(4, "STAGE 4: BLOOD MOON RAVE", "NON-STOP HORDE BEAT DROP!"),
+        STAGE_5(5, "STAGE 5: APEX ENCORE", "FINAL CLIMAX / MAXIMUM BPM POWER!");
+
+        public final int stageNum;
+        public final String title;
+        public final String subtitle;
+
+        RhythmStage(int stageNum, String title, String subtitle) {
+            this.stageNum = stageNum;
+            this.title = title;
+            this.subtitle = subtitle;
+        }
+
+        public static RhythmStage forElapsedSeconds(int sec) {
+            int idx = Math.max(0, Math.min(4, sec / 60));
+            return values()[idx];
+        }
+    }
+
+    /** Arcade performance rank computed from timing hits & max combo. */
+    public static String computeRhythmRank(int perfects, int greats, int goods, int offs, int maxCombo) {
+        int total = perfects + greats + goods + offs;
+        if (total == 0) {
+            return "B";
+        }
+        double accuracy = (perfects * 1.0 + greats * 0.75 + goods * 0.45) / total;
+        if (accuracy >= 0.92 && maxCombo >= 25) return "SSS";
+        if (accuracy >= 0.85 && maxCombo >= 15) return "SS";
+        if (accuracy >= 0.75) return "S";
+        if (accuracy >= 0.58) return "A";
+        if (accuracy >= 0.38) return "B";
+        return "C";
+    }
+
     // Run / day-night survival rules (used by GamePanel)
     public static final int TIME_LIMIT_SECONDS = 300;       // survive 5:00 to win
     public static final int WAVE_SECONDS = 30;              // internal wave difficulty step every 30 s

@@ -56,6 +56,11 @@ public final class Monster extends Entity {
     private boolean provoked;        // true once hit by player or guard
     private double wanderAngle;
     private int wanderTimer;
+    private GameData.BeatNoteKind noteKind;
+    private int countdownBeats;      // 3..2..1..0 (0 = STRIKE! window for COUNTDOWN_FINISHER)
+    private boolean doubleBeatPrimed;
+    private int doubleBeatTimer;
+    private int beatBounceTick;
 
     /**
      * @param hpMultiplier wave/difficulty scaling for health (1.0 = base value)
@@ -78,6 +83,16 @@ public final class Monster extends Entity {
         this.raiding = true;
         this.wanderAngle = (Math.floorMod(seed, 360)) * Math.PI / 180.0;
         this.wanderTimer = 40 + Math.floorMod(seed, 50);
+        if (type == GameData.MonsterType.ZOMBIE_RUNNER) {
+            this.noteKind = GameData.BeatNoteKind.DOUBLE_BEAT;
+        } else if (type == GameData.MonsterType.ZOMBIE_TOXIC
+                || type == GameData.MonsterType.BANDIT_SHOOTER
+                || type == GameData.MonsterType.ZOMBIE_BOSS) {
+            this.noteKind = GameData.BeatNoteKind.COUNTDOWN_FINISHER;
+            this.countdownBeats = 1 + Math.floorMod(seed, 3);
+        } else {
+            this.noteKind = GameData.BeatNoteKind.SINGLE_BEAT;
+        }
         this.chaseAngle = target == null ? 0 : Math.atan2(target.getY() - y, target.getX() - x);
         if (map != null) {
             pushOutOfWalls();   // safety net if a caller spawns it on a blocked spot
@@ -96,6 +111,50 @@ public final class Monster extends Entity {
         this.raiding = raiding;
     }
 
+    public GameData.BeatNoteKind getNoteKind() {
+        return noteKind;
+    }
+
+    public void setNoteKind(GameData.BeatNoteKind kind) {
+        this.noteKind = kind == null ? GameData.BeatNoteKind.SINGLE_BEAT : kind;
+        if (this.noteKind == GameData.BeatNoteKind.COUNTDOWN_FINISHER && countdownBeats <= 0) {
+            countdownBeats = 3;
+        }
+    }
+
+    /** Pulses this monster on every 125 BPM beat, advancing countdown finishers (3 -> 2 -> 1 -> STRIKE!). */
+    public void onBeatPulse() {
+        if (!alive) {
+            return;
+        }
+        beatBounceTick = 6;
+        if (noteKind == GameData.BeatNoteKind.COUNTDOWN_FINISHER) {
+            countdownBeats = (countdownBeats <= 0) ? 3 : (countdownBeats - 1);
+        }
+    }
+
+    public boolean isFinisherReady() {
+        return noteKind == GameData.BeatNoteKind.COUNTDOWN_FINISHER && countdownBeats == 0;
+    }
+
+    public int getCountdownBeats() {
+        return countdownBeats;
+    }
+
+    public boolean isDoubleBeatPrimed() {
+        return doubleBeatPrimed && doubleBeatTimer > 0;
+    }
+
+    public void primeDoubleBeat() {
+        doubleBeatPrimed = true;
+        doubleBeatTimer = 28;
+    }
+
+    public void consumeDoubleBeat() {
+        doubleBeatPrimed = false;
+        doubleBeatTimer = 0;
+    }
+
     // ------------------------------------------------------------------ simulation
     @Override
     public void update() {
@@ -108,6 +167,10 @@ public final class Monster extends Entity {
         if (rangedCooldown > 0) rangedCooldown--;
         if (hitFlash > 0) hitFlash--;
         if (hitAnim > 0) hitAnim--;
+        if (beatBounceTick > 0) beatBounceTick--;
+        if (doubleBeatTimer > 0 && --doubleBeatTimer == 0) {
+            doubleBeatPrimed = false;
+        }
 
         // knockback slides the body back, then fades out
         if (Math.abs(pushX) + Math.abs(pushY) > 0.05) {
@@ -263,7 +326,13 @@ public final class Monster extends Entity {
             return false;
         }
         provoked = true;
-        takeDamage(damage);
+        int effective = (noteKind == GameData.BeatNoteKind.COUNTDOWN_FINISHER && countdownBeats > 0)
+                ? Math.max(1, damage / 2) : damage;
+        takeDamage(effective);
+        if (!alive && doubleBeatPrimed) {
+            alive = true;
+            hp = 1;
+        }
         hitFlash = HIT_FLASH_TICKS;
         double resist = type == GameData.MonsterType.ZOMBIE_BOSS ? 0.25 : 1.0;
         pushX += Math.cos(pushAngle) * pushPixels * 0.35 * resist;
@@ -376,28 +445,69 @@ public final class Monster extends Entity {
     }
 
     /**
-     * Draws a beat-synced target reticle around this living monster: shrinks toward the feet on each
-     * beat and flashes bright gold/cyan when the player is inside the PERFECT shot window.
+     * Draws choreographed neon beat target rings & overhead note badges for each BeatNoteKind:
+     * SINGLE_BEAT (cyan), DOUBLE_BEAT (2x rapid magenta), COUNTDOWN_FINISHER (3-2-1-STRIKE! gold),
+     * and DANGER_PARRY (red warning when lunging near the player).
      */
     public void drawBeatTargetRing(Graphics2D g2, double beatPhase, boolean perfectWindow) {
         if (!alive) {
             return;
         }
         Stroke old = g2.getStroke();
-        double pulse = 1.0 - beatPhase;
-        int baseR = (int) Math.round(13.0 * type.drawScale + pulse * 10.0);
+        boolean nearPlayer = target != null && distanceTo(target) <= 72.0;
+        double effectivePhase = (noteKind == GameData.BeatNoteKind.DOUBLE_BEAT)
+                ? ((beatPhase * 2.0) % 1.0)
+                : beatPhase;
+        double pulse = 1.0 - effectivePhase;
+        int bounceBoost = beatBounceTick > 0 ? 3 : 0;
+        int baseR = (int) Math.round(13.0 * type.drawScale + pulse * 10.0) + bounceBoost;
         int cx = (int) x;
         int cy = (int) getFeetY() - 3;
-        Color ringColor = perfectWindow
-                ? new Color(255, 225, 65, 210)
-                : new Color(70, 225, 255, (int) (90 + 90 * (1.0 - Math.abs(beatPhase - 0.5) * 2.0)));
+
+        Color ringColor;
+        String badge = null;
+        Color badgeColor;
+        if (nearPlayer) {
+            ringColor = new Color(255, 65, 85, 225);
+            badge = "PARRY!";
+            badgeColor = new Color(255, 95, 110);
+        } else if (noteKind == GameData.BeatNoteKind.COUNTDOWN_FINISHER) {
+            boolean ready = (countdownBeats == 0);
+            ringColor = ready ? new Color(255, 225, 55, 240) : new Color(255, 165, 50, 185);
+            badge = ready ? "STRIKE!" : String.valueOf(countdownBeats);
+            badgeColor = ready ? Theme.GOLD : new Color(255, 185, 70);
+        } else if (noteKind == GameData.BeatNoteKind.DOUBLE_BEAT) {
+            boolean primed = isDoubleBeatPrimed();
+            ringColor = primed ? new Color(255, 225, 65, 240) : new Color(255, 85, 215, 210);
+            badge = primed ? "HIT 2X!" : "2X";
+            badgeColor = primed ? Theme.GOLD : new Color(255, 120, 230);
+        } else {
+            ringColor = perfectWindow
+                    ? new Color(255, 225, 65, 215)
+                    : new Color(70, 225, 255, (int) (105 + 90 * (1.0 - Math.abs(beatPhase - 0.5) * 2.0)));
+            badge = perfectWindow ? "BEAT" : null;
+            badgeColor = new Color(110, 245, 255);
+        }
+
         g2.setColor(ringColor);
-        g2.setStroke(new BasicStroke(perfectWindow ? 2.2f : 1.4f));
+        g2.setStroke(new BasicStroke((perfectWindow || nearPlayer || isFinisherReady() || isDoubleBeatPrimed()) ? 2.2f : 1.4f));
         g2.drawOval(cx - baseR, cy - baseR / 2, baseR * 2, baseR);
-        if (perfectWindow) {
+
+        if (noteKind == GameData.BeatNoteKind.DOUBLE_BEAT || noteKind == GameData.BeatNoteKind.COUNTDOWN_FINISHER) {
+            int outerR = baseR + 4;
+            g2.setStroke(new BasicStroke(1.2f));
+            g2.drawOval(cx - outerR, cy - outerR / 2, outerR * 2, outerR);
+        }
+        if (perfectWindow || isFinisherReady() || nearPlayer) {
             int tick = 5;
             g2.drawLine(cx - baseR - tick, cy, cx - baseR + 2, cy);
             g2.drawLine(cx + baseR - 2, cy, cx + baseR + tick, cy);
+        }
+
+        if (badge != null) {
+            int topY = (int) (getFeetY() - 32 * type.drawScale) - (hp < maxHp ? 16 : 9);
+            int bw = Theme.pixelWidth(badge, 1);
+            Theme.drawPixelTextShadow(g2, badge, cx - bw / 2, topY, 1, badgeColor);
         }
         g2.setStroke(old);
     }

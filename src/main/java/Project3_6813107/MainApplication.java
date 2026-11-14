@@ -369,35 +369,35 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.DAY_CYCLE_SECONDS;
         howToArea = Theme.textBlock("Survive " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
-                + " Day and Night cycles! Your runner sprints continuously along the map route at 125 BPM."
-                + " Shoot monsters ON THE BEAT to rack up Combos, Fever Overdrive, and explosive screen-shaking hits!",
+                + " Day/Night cycles and 5 Beat Stages! Run at 125 BPM with Hybrid Lock-On: press SPACE/F or CLICK"
+                + " ON THE BEAT to snap-fire neon rail-beams, trigger hit-stop, and earn S-Ranks.",
                 13, Theme.PAPER_TEXT);
-        form.add(new Theme.PixelLabel("RHYTHM SURVIVAL GOAL", 2, Theme.DARK_RED), 0);
-        form.add(howToArea, 6);
+        form.add(new Theme.PixelLabel("BEAT OVERDRIVE GOAL", 2, Theme.DARK_RED), 0);
+        form.add(howToArea, 4);
 
         // each row: what it does, then the keys (sprites from the Hollow Creek UI kit)
         String[][] controls = {
-            {"Dodge", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
-            {"Grenade", "mouse_right", "g"}, {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"},
-            {"Switch weapon (1-7)", "mouse_mid"}, {"Shop (Anytime)", "b"},
-            {"Pause", "p", "esc"}, {"Craft / Build / Heal", "enter"}
+            {"Dodge / Strafe", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
+            {"Parry Dash", "shift", "mouse_right"}, {"Grenade", "g"},
+            {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"}, {"Switch Weapon", "mouse_mid"},
+            {"Upgrade Shop", "b"}, {"Pause", "p", "esc"}
         };
-        JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 6));
+        JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 5));
         for (String[] c : controls) {
             String[] keyNames = Arrays.copyOfRange(c, 1, c.length);
             keys.add(Theme.row(8, Theme.keyCaps(2, keyNames), Theme.label(c[0], Font.PLAIN, 13, Theme.PAPER_TEXT)));
         }
-        form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 14);
-        form.add(keys, 8);
+        form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 10);
+        form.add(keys, 6);
 
-        form.add(new Theme.PixelLabel("125 BPM BEAT COMBO, FEVER & LAPS", 2, Theme.DARK_RED), 14);
-        form.add(Theme.textBlock("Watch the bottom Beat Bar & monster rings: press SPACE or CLICK on the beat for"
-                + " PERFECT / GREAT bonus score and Fever charge. Fill Fever 100% for Fever Overdrive (infinite ammo, 2x damage,"
-                + " golden trails). Complete full map laps for HP, Ammo & Scraps, or press B anytime to upgrade.",
-                13, Theme.PAPER_TEXT), 6);
+        form.add(new Theme.PixelLabel("BEAT NOTES, PARRY DASH & SUPERNOVAS", 2, Theme.DARK_RED), 10);
+        form.add(Theme.textBlock("CYAN: 1-Beat Shot. MAGENTA 2X: rapid half-beat pair. GOLD 3-2-1 STRIKE!: Supernova blast!"
+                + " Press SHIFT / RIGHT CLICK on beat for Parry Dash (i-frames, reflects shots, +8 Ammo)."
+                + " Fill Fever 100% for infinite ammo & 2x score!",
+                13, Theme.PAPER_TEXT), 4);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);
-        card.setBorder(new EmptyBorder(16, 40, 14, 22));   // clear of the paper's red margin line
+        card.setBorder(new EmptyBorder(20, 40, 12, 22));   // clear of the paper's red margin line & top bevel
         card.add(page, BorderLayout.CENTER);
         return card;
     }
