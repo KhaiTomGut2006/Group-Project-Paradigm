@@ -304,10 +304,33 @@ write("gameover", concat_notes([392, 370, 349, 262], tri, 0.32, gap=0.04, cut=25
 write("win", concat_notes([523, 659, 784, 1047, 784, 1047], None, 0.13, cut=6000, duty=0.5), gain=0.8)
 
 
+def perfect_hit():
+    thump = gunshot(0.14, 240, 55, 4000, 600, body=0.9, tail=0.35, crack=0.4)
+    chime = concat_notes([1047, 1319, 1568], None, 0.045, cut=8500, duty=0.25)
+    return mix(thump, chime)
+
+
+write("perfect_hit", perfect_hit(), gain=0.9)
+
+
+def fever_activate():
+    rise = sweep_tone(0.45, 220, 880, lambda p: square(p, 0.35), a=0.01, d=0.08, s=0.8, r=0.1, cut=7000)
+    chord = mix(
+        sweep_tone(0.65, 440, 440, tri, a=0.02, d=0.1, s=0.7, r=0.2, cut=6000),
+        sweep_tone(0.65, 554.37, 554.37, tri, a=0.02, d=0.1, s=0.7, r=0.2, cut=6000),
+        sweep_tone(0.65, 659.25, 659.25, tri, a=0.02, d=0.1, s=0.7, r=0.2, cut=6000),
+    )
+    return mix(rise, [0.0] * n(0.12) + chord, explosion()[:n(0.55)])
+
+
+write("fever", fever_activate(), gain=0.95)
+write("off_beat", concat_notes([155, 130], tri, 0.055, cut=900), gain=0.55)
+
+
 # ---------------------------------------------------------------- BGM (seamless loop)
-BPM = 96
-BEAT = 60.0 / BPM
-BEATS = 32                       # 8 bars of 4/4 = 20 s
+BPM = 125
+BEAT = 60.0 / BPM                # 0.48 s per beat = exact 30 simulation ticks at 16 ms/tick
+BEATS = 32                       # 8 bars of 4/4 = 15.36 s
 N = int(round(BEATS * BEAT * SR))
 buf = [0.0] * N
 
@@ -345,50 +368,51 @@ def at(beat):
     return int(round(beat * BEAT * SR))
 
 
-# chord roots per bar (A minor: Am Am F G Am Am Dm E)
+# driving darksynth / electro-rock progression (A minor: Am Am F G Am Am Dm E)
 roots = [45, 45, 41, 43, 45, 45, 38, 40]
 pads = [[57, 60, 64], [57, 60, 64], [53, 57, 60], [55, 59, 62], [57, 60, 64], [57, 60, 64], [50, 53, 57], [52, 56, 59]]
 for bar, root in enumerate(roots):
     base = bar * 4
     # bass: driving eighths with an octave pop on the off-beat of beat 3
-    pattern = [0, 0, 12, 0, 0, 0, 12, 7]
+    pattern = [0, 0, 12, 0, 0, 12, 0, 7]
     for k, step in enumerate(pattern):
-        add_circular(at(base + k * 0.5), note_samples(midi(root + step - 12), BEAT * 0.45, "saw", 420, a=0.004, d=0.08, s=0.5, r=0.06), 0.42)
-    # pad: long soft triangle chord
+        add_circular(at(base + k * 0.5), note_samples(midi(root + step - 12), BEAT * 0.44, "saw", 620, a=0.003, d=0.07, s=0.55, r=0.05), 0.45)
+    # pad: soft triangle chord
     for m in pads[bar]:
-        add_circular(at(base), note_samples(midi(m), BEAT * 4.2, "tri", 1400, a=0.4, d=0.5, s=0.7, r=0.8), 0.10)
+        add_circular(at(base), note_samples(midi(m), BEAT * 4.1, "tri", 1500, a=0.25, d=0.4, s=0.65, r=0.6), 0.08)
 
-# lead arpeggio only in bars 5-8 so the loop has some development
+# lead arpeggio across all 8 bars so the rhythm groove stays energetic
 arp = [69, 72, 76, 72, 69, 72, 76, 79]
-for bar in range(4, 8):
+for bar in range(8):
     shift = pads[bar][0] - 57
+    gain_arp = 0.07 if bar < 4 else 0.11
+    cut_arp = 2200 if bar < 4 else 3400
     for k, m in enumerate(arp):
-        add_circular(at(bar * 4 + k * 0.5), note_samples(midi(m + shift + 12), BEAT * 0.3, "pulse", 2600, a=0.003, d=0.05, s=0.4, r=0.08), 0.07)
+        add_circular(at(bar * 4 + k * 0.5), note_samples(midi(m + shift + 12), BEAT * 0.28, "pulse", cut_arp, a=0.002, d=0.04, s=0.45, r=0.06), gain_arp)
 
-# drums
+# drums: four-on-the-floor kick on EVERY beat so the player clearly hears the 125 BPM pulse
 for beat in range(BEATS):
-    # kick on 1 and 3, plus a pickup kick before every 4th bar
-    if beat % 2 == 0 or (beat % 16 == 15):
-        total = n(0.25)
-        k_out = []
-        phase = 0.0
-        for i in range(total):
-            t = i / total
-            phase += (110 * (0.35 ** t)) / SR
-            k_out.append(math.sin(2 * math.pi * phase) * math.exp(-t * 6))
-        add_circular(at(beat), k_out, 0.55)
-    # snare on 2 and 4
+    total = n(0.24)
+    k_out = []
+    phase = 0.0
+    for i in range(total):
+        t = i / total
+        phase += (125 * (0.32 ** t)) / SR
+        click = noise() * math.exp(-i / (SR * 0.005)) * 0.35
+        k_out.append(math.sin(2 * math.pi * phase) * math.exp(-t * 6.5) + click)
+    add_circular(at(beat), k_out, 0.65)
+    # snare on 2 and 4 (beat % 2 == 1)
     if beat % 2 == 1:
         total = n(0.18)
-        lp = LowPass(4000)
-        s_out = [lp(noise()) * math.exp(-(i / total) * 7) + math.sin(2 * math.pi * 190 * i / SR) * math.exp(-(i / total) * 14) * 0.4 for i in range(total)]
-        add_circular(at(beat), s_out, 0.22)
+        lp = LowPass(4800)
+        s_out = [lp(noise()) * math.exp(-(i / total) * 6.5) + math.sin(2 * math.pi * 200 * i / SR) * math.exp(-(i / total) * 14) * 0.45 for i in range(total)]
+        add_circular(at(beat), s_out, 0.30)
     # closed hats on every eighth
     for half in (0.0, 0.5):
         total = n(0.05)
         hp = HighPass(6000)
         h_out = [hp(noise()) * math.exp(-(i / total) * 8) for i in range(total)]
-        add_circular(at(beat + half), h_out, 0.10 if half else 0.07)
+        add_circular(at(beat + half), h_out, 0.13 if half else 0.08)
 
-write("bgm", buf, gain=0.8, loop=True)
+write("bgm", buf, gain=0.85, loop=True)
 print("ok")

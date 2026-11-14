@@ -5,10 +5,12 @@
 package Project3_6813107;
 
 import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Composite;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.Stroke;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -73,7 +75,7 @@ public final class Monster extends Entity {
         this.repathTimer = Math.floorMod(seed, 6);
         this.rangedCooldown = GameData.msToTicks(type.rangedCooldownMs / 2 + Math.floorMod(seed, 900));
         this.strafeSign = (seed & 1) == 0 ? 1 : -1;
-        this.raiding = (type == GameData.MonsterType.ZOMBIE_BOSS);
+        this.raiding = true;
         this.wanderAngle = (Math.floorMod(seed, 360)) * Math.PI / 180.0;
         this.wanderTimer = 40 + Math.floorMod(seed, 50);
         this.chaseAngle = target == null ? 0 : Math.atan2(target.getY() - y, target.getX() - x);
@@ -371,6 +373,33 @@ public final class Monster extends Entity {
         if (hp < maxHp) {
             drawHealthBar(g2, scale);
         }
+    }
+
+    /**
+     * Draws a beat-synced target reticle around this living monster: shrinks toward the feet on each
+     * beat and flashes bright gold/cyan when the player is inside the PERFECT shot window.
+     */
+    public void drawBeatTargetRing(Graphics2D g2, double beatPhase, boolean perfectWindow) {
+        if (!alive) {
+            return;
+        }
+        Stroke old = g2.getStroke();
+        double pulse = 1.0 - beatPhase;
+        int baseR = (int) Math.round(13.0 * type.drawScale + pulse * 10.0);
+        int cx = (int) x;
+        int cy = (int) getFeetY() - 3;
+        Color ringColor = perfectWindow
+                ? new Color(255, 225, 65, 210)
+                : new Color(70, 225, 255, (int) (90 + 90 * (1.0 - Math.abs(beatPhase - 0.5) * 2.0)));
+        g2.setColor(ringColor);
+        g2.setStroke(new BasicStroke(perfectWindow ? 2.2f : 1.4f));
+        g2.drawOval(cx - baseR, cy - baseR / 2, baseR * 2, baseR);
+        if (perfectWindow) {
+            int tick = 5;
+            g2.drawLine(cx - baseR - tick, cy, cx - baseR + 2, cy);
+            g2.drawLine(cx + baseR - 2, cy, cx + baseR + tick, cy);
+        }
+        g2.setStroke(old);
     }
 
     /** Small bobbing green drops around the toxic zombie. */

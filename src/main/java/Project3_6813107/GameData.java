@@ -43,9 +43,9 @@ public final class GameData {
 
     // Player base stats (class bonuses and upgrades are added on top of these)
     public static final int PLAYER_BASE_HP = 100;
-    public static final double PLAYER_BASE_SPEED = 1.5;     // world pixels per tick
-    public static final int PLAYER_PICKUP_RADIUS = 40;      // world pixels; items inside fly to the player
-    public static final int PLAYER_START_AMMO = 40;
+    public static final double PLAYER_BASE_SPEED = 1.65;    // world pixels per tick
+    public static final int PLAYER_PICKUP_RADIUS = 85;      // world pixels; items inside fly to the player
+    public static final int PLAYER_START_AMMO = 120;
     public static final int PLAYER_INVULNERABLE_MS = 450;   // short mercy time after being hit
     public static final int MEDKIT_HEAL = 40;
     public static final int FOOD_HEAL = 6;                  // instant heal when a FOOD item is picked up
@@ -54,6 +54,39 @@ public final class GameData {
     public static final int GRENADE_COOLDOWN_MS = 600;
     public static final int POISON_TICK_DAMAGE = 2;         // damage per poison pulse from toxic spit
     public static final int POISON_PULSE_MS = 500;
+
+    // Rhythm combat & Fever Overdrive (125 BPM -> 480 ms per beat -> 30 ticks at 16 ms/tick)
+    public static final int BEAT_TICKS = 30;
+    public static final int HALF_BEAT_TICKS = 15;
+    public static final int PERFECT_WINDOW_TICKS = 5;       // within +/- 80 ms of beat
+    public static final int GREAT_WINDOW_TICKS = 9;         // within +/- 144 ms of beat
+    public static final int GOOD_WINDOW_TICKS = 12;         // within +/- 192 ms of beat
+    public static final int FEVER_MAX = 100;
+    public static final int FEVER_DURATION_TICKS = 500;     // ~8 seconds of Fever Overdrive
+
+    /** Timing grades for rhythm shots fired against the 125 BPM pulse. */
+    public enum RhythmJudge {
+        PERFECT("PERFECT!", 2.5, 300, 18, 7.5, 2),
+        GREAT("GREAT!", 1.6, 150, 10, 4.5, 1),
+        GOOD("GOOD", 1.0, 60, 4, 2.0, 0),
+        OFF_BEAT("OFF BEAT", 0.45, 0, -6, 1.2, 0);
+
+        public final String label;
+        public final double damageMult;
+        public final int basePoints;
+        public final int feverDelta;
+        public final double shakePower;
+        public final int bonusPierce;
+
+        RhythmJudge(String label, double damageMult, int basePoints, int feverDelta, double shakePower, int bonusPierce) {
+            this.label = label;
+            this.damageMult = damageMult;
+            this.basePoints = basePoints;
+            this.feverDelta = feverDelta;
+            this.shakePower = shakePower;
+            this.bonusPierce = bonusPierce;
+        }
+    }
 
     // Run / day-night survival rules (used by GamePanel)
     public static final int TIME_LIMIT_SECONDS = 300;       // survive 5:00 to win
@@ -222,9 +255,10 @@ public final class GameData {
         WeaponType.SHOTGUN, WeaponType.RIFLE, WeaponType.SNIPER, WeaponType.ROCKET_LAUNCHER
     };
 
-    /** Legacy list kept for test harnesses. */
+    /** Starter weapons available in the launcher loadout combo. */
     public static final WeaponType[] START_WEAPONS = {
-        WeaponType.KNIFE, WeaponType.AXE, WeaponType.PISTOL, WeaponType.REVOLVER, WeaponType.SHOTGUN, WeaponType.RIFLE
+        WeaponType.PISTOL, WeaponType.REVOLVER, WeaponType.SHOTGUN,
+        WeaponType.RIFLE, WeaponType.SNIPER, WeaponType.KNIFE
     };
 
     // ------------------------------------------------------------------ monsters
@@ -428,9 +462,9 @@ public final class GameData {
     // ------------------------------------------------------------------ settings
     /** Everything the launcher hands to the game. Plain public fields with sane defaults. */
     public static class GameSettings {
-        public String playerName = "Survivor";
+        public String playerName = "Runner";
         public PlayerClass playerClass = PlayerClass.SCAVENGER;
-        public WeaponType startWeapon = WeaponType.KNIFE;
+        public WeaponType startWeapon = WeaponType.PISTOL;
         public MapType map = MapType.WASTELAND_HIGHWAY;
         public int difficulty = 3;                  // 1..5 from JSlider
         public int volume = 70;                     // 0..100 from JSlider
@@ -563,17 +597,25 @@ public final class GameData {
 
     private static final String SCORE_FILE_NAME = "highscores.txt";
 
-    /** The score file sits next to the sources when run from the project, otherwise next to the classes. */
+    /** The score file sits next to the sources when run from the project, in cwd when writable, else ~/.last_camp_survivor. */
     private static File scoreFile() {
         File srcDir = new File("src/main/java/Project3_6813107");
-        if (srcDir.isDirectory()) {
+        if (srcDir.isDirectory() && srcDir.canWrite()) {
             return new File(srcDir, SCORE_FILE_NAME);
         }
         File pkgDir = new File("Project3_6813107");
-        if (pkgDir.isDirectory()) {
+        if (pkgDir.isDirectory() && pkgDir.canWrite()) {
             return new File(pkgDir, SCORE_FILE_NAME);
         }
-        return new File(SCORE_FILE_NAME);
+        File cwd = new File(System.getProperty("user.dir", "."));
+        if (cwd.isDirectory() && cwd.canWrite()) {
+            return new File(cwd, SCORE_FILE_NAME);
+        }
+        File homeDir = new File(System.getProperty("user.home", "."), ".last_camp_survivor");
+        if (!homeDir.exists()) {
+            homeDir.mkdirs();
+        }
+        return new File(homeDir, SCORE_FILE_NAME);
     }
 
     /** All saved scores, best first. Never throws: any problem gives an empty (or partial) list. */

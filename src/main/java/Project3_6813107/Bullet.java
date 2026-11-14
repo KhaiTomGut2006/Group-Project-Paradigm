@@ -36,12 +36,13 @@ public final class Bullet extends Entity {
     private final boolean hostile;          // true = fired by a monster, hurts the player
     private final int damage;
     private final double angle;
-    private final double vx, vy;
-    private final double maxRange;
+    private double vx, vy;
+    private double maxRange;
     private final boolean explosive;
     private final int blastRadius;
     private final int knockback;
     private int pierceLeft;
+    private int rhythmTier;
     private double travelled;
     private final List<Entity> alreadyHit = new ArrayList<>();
     private boolean explosionPending;
@@ -271,6 +272,21 @@ public final class Bullet extends Entity {
     }
 
     // ------------------------------------------------------------------ drawing
+    /** Upgrades projectile visuals, pierce, and velocity when fired on the rhythm beat. */
+    public void applyRhythmBoost(int tier, int extraPierce, double speedMult) {
+        this.rhythmTier = Math.max(this.rhythmTier, tier);
+        this.pierceLeft += Math.max(0, extraPierce);
+        if (speedMult > 0.1 && speedMult != 1.0) {
+            this.vx *= speedMult;
+            this.vy *= speedMult;
+            this.maxRange *= Math.max(1.0, speedMult);
+        }
+    }
+
+    public int getRhythmTier() {
+        return rhythmTier;
+    }
+
     @Override
     public void draw(Graphics2D g2) {
         if (!alive) {
@@ -285,7 +301,23 @@ public final class Bullet extends Entity {
             g2.setColor(new Color(0, 0, 0, 70));
             g2.fillOval((int) x - 4, (int) y - 1, 8, 4);
         }
-        if (kind == GameData.Projectile.SNIPER_ROUND) {
+        if (rhythmTier >= 2) {
+            Stroke old = g2.getStroke();
+            boolean tier3 = rhythmTier >= 3;
+            Color outer = tier3 ? new Color(255, 220, 60, 125) : new Color(60, 235, 255, 115);
+            Color core = tier3 ? new Color(255, 250, 210, 210) : new Color(200, 250, 255, 195);
+            double tailScale = tier3 ? 4.4 : 3.2;
+            g2.setStroke(new BasicStroke(tier3 ? 5.0f : 3.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.setColor(outer);
+            g2.drawLine((int) (x - vx * tailScale), (int) (y - vy * tailScale), (int) x, (int) y);
+            g2.setStroke(new BasicStroke(tier3 ? 2.2f : 1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.setColor(core);
+            g2.drawLine((int) (x - vx * (tailScale * 0.65)), (int) (y - vy * (tailScale * 0.65)), (int) x, (int) y);
+            int halo = tier3 ? 11 : 8;
+            g2.setColor(outer);
+            g2.fillOval((int) x - halo / 2, (int) y - halo / 2, halo, halo);
+            g2.setStroke(old);
+        } else if (kind == GameData.Projectile.SNIPER_ROUND) {
             Stroke old = g2.getStroke();
             g2.setStroke(new BasicStroke(1.5f));
             g2.setColor(new Color(255, 240, 200, 110));

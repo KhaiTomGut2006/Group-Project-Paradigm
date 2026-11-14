@@ -333,6 +333,7 @@ public final class GameMap {
     private Point playerSpawn;
     private final List<Point> spawnPoints = new ArrayList<>();
     private final List<Point> guardPosts = new ArrayList<>();
+    private final List<Point> autoRunRoute = new ArrayList<>();
     private Point traderPosition;
     private int appliedTurretLv;
     private int appliedWallLv;
@@ -371,6 +372,7 @@ public final class GameMap {
         renderGround();
         computeWalkable();
         findSpawnPoints();
+        buildAutoRunRoute();
         renderMinimap();
     }
 
@@ -1914,6 +1916,80 @@ public final class GameMap {
         if (spawnPoints.isEmpty()) {
             spawnPoints.add(new Point(playerSpawn));   // never happens with the built-in maps
         }
+    }
+
+    /**
+     * Builds a closed 12-waypoint patrol loop around all four quadrants of the map, snapping each
+     * anchor to the nearest tile reachable on foot from playerSpawn.
+     */
+    private void buildAutoRunRoute() {
+        autoRunRoute.clear();
+        int[][] fromCamp = new int[ROWS][COLS];
+        fillDistances(fromCamp, playerSpawn.x / T, playerSpawn.y / T);
+        int sc = Math.max(2, Math.min(COLS - 3, playerSpawn.x / T));
+        int sr = Math.max(2, Math.min(ROWS - 3, playerSpawn.y / T));
+        int[][] anchors = {
+            {sc, sr},
+            {12, sr},
+            {7, 8},
+            {18, 6},
+            {36, 6},
+            {COLS - 8, 8},
+            {COLS - 7, ROWS / 2},
+            {COLS - 8, ROWS - 8},
+            {36, ROWS - 7},
+            {18, ROWS - 7},
+            {7, ROWS - 8},
+            {Math.max(4, sc - 3), sr}
+        };
+        for (int[] a : anchors) {
+            Point p = nearestReachablePoint(a[0], a[1], fromCamp);
+            if (p != null) {
+                if (autoRunRoute.isEmpty() || autoRunRoute.get(autoRunRoute.size() - 1).distance(p) > T * 1.5) {
+                    autoRunRoute.add(p);
+                }
+            }
+        }
+        if (autoRunRoute.isEmpty()) {
+            autoRunRoute.add(new Point(playerSpawn));
+        }
+    }
+
+    private Point nearestReachablePoint(int targetCol, int targetRow, int[][] fromCamp) {
+        int bestC = Math.max(1, Math.min(COLS - 2, targetCol));
+        int bestR = Math.max(1, Math.min(ROWS - 2, targetRow));
+        int bestDist = Integer.MAX_VALUE;
+        for (int r = 1; r < ROWS - 1; r++) {
+            for (int c = 1; c < COLS - 1; c++) {
+                if (!walkable[r][c] || fromCamp[r][c] >= FAR) {
+                    continue;
+                }
+                int dc = c - targetCol;
+                int dr = r - targetRow;
+                int d2 = dc * dc + dr * dr;
+                if (d2 < bestDist) {
+                    bestDist = d2;
+                    bestC = c;
+                    bestR = r;
+                }
+            }
+        }
+        return new Point(bestC * T + T / 2, bestR * T + T / 2);
+    }
+
+    public List<Point> getAutoRunRoute() {
+        return Collections.unmodifiableList(autoRunRoute);
+    }
+
+    public Point getWaypoint(int index) {
+        if (autoRunRoute.isEmpty()) {
+            return new Point(playerSpawn);
+        }
+        return autoRunRoute.get(Math.floorMod(index, autoRunRoute.size()));
+    }
+
+    public int getWaypointCount() {
+        return autoRunRoute.size();
     }
 
     private void renderMinimap() {

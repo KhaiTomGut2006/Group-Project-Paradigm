@@ -17,6 +17,7 @@ import java.awt.Point;
 import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.Toolkit;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
@@ -68,7 +69,7 @@ public final class GamePanel extends JPanel
     private static final int MAX_SPAWNS_PER_TICK = 2;             // a big batch trickles in over a few frames
     private static final int BOSS_WARNING_TICKS = 150;            // warning banner before the boss walks in
     private static final int GAME_OVER_DELAY_TICKS = 110;         // show "YOU DIED"/"YOU SURVIVED" before the summary
-    private static final int MAX_EFFECTS = 250;
+    private static final int MAX_EFFECTS = 600;
     private static final int WHEEL_DELAY_TICKS = 8;               // trackpads send many wheel events per swipe
 
     private static final Color BACKGROUND = new Color(18, 16, 20);
@@ -139,21 +140,44 @@ public final class GamePanel extends JPanel
     private double shakePower;
     private int lastPickupTick, pickupStack;   // stacking of pickup labels
 
+    // ------------------------------------------------------------------ rhythm & auto-runner state
+    private int waypointIndex = 1;
+    private int stuckTicks;
+    private int lapsCompleted;
+    private int combo;
+    private int maxCombo;
+    private int feverCharge;
+    private int feverTicks;
+    private int rhythmBonusScore;
+    private int perfectHits, greatHits, goodHits, offBeatHits;
+    private GameData.RhythmJudge lastJudge;
+    private int lastJudgeTick = -999;
+    private int lastRhythmBeatScored = -1;
+    private int lastAutoBeatFired = -1;
+    private volatile boolean beatShotRequested;
+    private volatile boolean spaceAimTarget;
+    private double zoomKick;
+    private double recoilX, recoilY;
+    private Color screenFlashColor;
+    private int screenFlashTicks, screenFlashMax;
+
     // ------------------------------------------------------------------ drawing helpers (Swing thread only)
     private final transient List<GameMap.Drawable> drawList = new ArrayList<>();
     private final transient BufferedImage[] explosionFrames = AssetLoader.getExplosionFrames();
     private final transient BufferedImage[] impactFrames = AssetLoader.getImpactFrames();
     private transient BufferedImage vignette;            // red edge for low health, rebuilt only when the size changes
     private int originX, originY;              // screen pixel of world (0, 0) in the frame being painted
+    private double currentZoom = 1.0;
 
     // ------------------------------------------------------------------ small helper types
-    /** A short-lived visual: floating text, bullet impact or explosion (world coordinates). */
+    /** A short-lived visual: floating text, bullet impact, explosion, shockwave, beam, spark, or afterimage. */
     static final class Effect {
-        enum Kind { TEXT, IMPACT, EXPLOSION }
+        enum Kind { TEXT, IMPACT, EXPLOSION, SHOCKWAVE, BEAM, SPARK, AFTERIMAGE }
 
         final Kind kind;
-        final double x;
-        double y;
+        double x, y;
+        final double x2, y2;
+        double vx, vy;
         final int life;
         int age;
         final String text;
@@ -161,10 +185,19 @@ public final class GamePanel extends JPanel
         final int size;
 
         Effect(Kind kind, double x, double y, int life, String text, Color color, int size) {
+            this(kind, x, y, 0, 0, 0, 0, life, text, color, size);
+        }
+
+        Effect(Kind kind, double x, double y, double x2, double y2, double vx, double vy,
+                int life, String text, Color color, int size) {
             this.kind = kind;
             this.x = x;
             this.y = y;
-            this.life = life;
+            this.x2 = x2;
+            this.y2 = y2;
+            this.vx = vx;
+            this.vy = vy;
+            this.life = Math.max(1, life);
             this.text = text;
             this.color = color;
             this.size = size;
@@ -348,10 +381,10 @@ public final class GamePanel extends JPanel
         updateCamera(1.0);   // start centred on the player
         preloadSprites();
         spawnInitialScavengeWorld();
-        showBanner("DAY 1 - DAWN", "62s Daylight: scavenge with your NPC ally & build camp [B]", BANNER_WAVE);
+        showBanner("BEAT CAMP RUNNER", "125 BPM AUTO-RUN / SHOOT ON BEAT / SPACE OR CLICK", BANNER_WAVE);
     }
 
-    /** Populates outer map zones with roaming zombies, supply chests, and 1 starting NPC companion. */
+    /** Populates routes and outer zones with zombies, supply chests, and 1 starting NPC companion. */
     private void spawnInitialScavengeWorld() {
         for (int i = 0; i < 4; i++) {
             Point p = map.randomOuterLootPoint(rng);
@@ -359,10 +392,15 @@ public final class GamePanel extends JPanel
             chest.setMap(map);
             drops.add(chest);
         }
-        for (int i = 0; i < 4; i++) {
-            Point p = map.randomOuterLootPoint(rng);
+        int wpCount = Math.max(1, map.getWaypointCount());
+        for (int i = 0; i < 6; i++) {
+            Point wp = map.getWaypoint((i + 1) % wpCount);
+            double px = wp.x + (rng.nextDouble() - 0.5) * 90;
+            double py = wp.y + (rng.nextDouble() - 0.5) * 90;
+            Point p = map.isBlocked(new Rectangle((int) px - 8, (int) py - 8, 16, 16))
+                    ? map.randomOuterLootPoint(rng) : new Point((int) px, (int) py);
             Monster m = new Monster(GameData.MonsterType.ZOMBIE_NORMAL, p.x, p.y, map, player, GameData.monsterHpScale(1, getDifficulty()));
-            m.setRaiding(false);
+            m.setRaiding(true);
             monsters.add(m);
         }
         allies.add(new AllyNpc(0, player.getX() - 26, player.getY() + 12));
@@ -577,6 +615,30 @@ public final class GamePanel extends JPanel
         if (bossTimer > 0 && --bossTimer == 0) {
             spawnBoss();
         }
+        if (elapsedTicks % GameData.BEAT_TICKS == 0) {
+            boolean fever = isFeverActive();
+            zoomKick = Math.max(zoomKick, fever ? 0.045 : 0.022);
+            addEffect(new Effect(Effect.Kind.SHOCKWAVE, player.getX(), player.getFeetY() - 2,
+                    0, 0, 0, 0, 14, null,
+                    fever ? new Color(255, 220, 60, 170) : new Color(70, 225, 255, 130),
+                    fever ? 32 : 20));
+        }
+        if (feverTicks > 0) {
+            feverTicks--;
+            if (feverTicks % 30 == 0 && player.getHp() < player.getMaxHp()) {
+                player.heal(1);
+            }
+            if (feverTicks % 4 == 0) {
+                double ang = rng.nextDouble() * Math.PI * 2;
+                double spd = 0.8 + rng.nextDouble() * 1.4;
+                addEffect(new Effect(Effect.Kind.SPARK, player.getX(), player.getY(),
+                        0, 0, Math.cos(ang) * spd, Math.sin(ang) * spd, 12, null,
+                        new Color(255, 225, 70, 220), 3));
+            }
+            if (feverTicks == 0) {
+                addText(player.getX(), player.getY() - 28, "FEVER END", Theme.GOLD);
+            }
+        }
     }
 
     private void startDay(int dayNumber) {
@@ -725,13 +787,25 @@ public final class GamePanel extends JPanel
         pendingSpawns.addAndGet(-count);
     }
 
-    /** New monsters appear outside camera view during raids, or in outer zones during scavenge phase. */
+    /** New monsters spawn along upcoming patrol segments or map borders and aggressively chase the runner. */
     private Monster spawnMonster(GameData.MonsterType type) {
         boolean boss = type == GameData.MonsterType.ZOMBIE_BOSS;
-        boolean raid = raidActive || boss || rng.nextInt(3) == 0;
-        Point p = raid ? map.randomSpawnPoint(rng, getCameraView()) : map.randomOuterLootPoint(rng);
+        Point p = null;
+        int wpCount = map.getWaypointCount();
+        if (!boss && wpCount > 0 && rng.nextBoolean()) {
+            Point ahead = map.getWaypoint((waypointIndex + 1 + rng.nextInt(2)) % wpCount);
+            int cx = ahead.x + rng.nextInt(121) - 60;
+            int cy = ahead.y + rng.nextInt(121) - 60;
+            Rectangle feet = new Rectangle(cx - type.hitboxW / 2, cy, type.hitboxW, 8);
+            if (!map.isBlocked(feet) && player.distanceTo(cx, cy) > 130.0) {
+                p = new Point(cx, cy);
+            }
+        }
+        if (p == null) {
+            p = map.randomSpawnPoint(rng, getCameraView());
+        }
         Monster m = new Monster(type, p.x, p.y, map, player, GameData.monsterHpScale(wave, getDifficulty()));
-        m.setRaiding(raid);
+        m.setRaiding(true);
         monsters.add(m);
         return m;
     }
@@ -739,11 +813,12 @@ public final class GamePanel extends JPanel
     private void spawnBoss() {
         spawnMonster(GameData.MonsterType.ZOMBIE_BOSS);
         AssetLoader.playSound("boss_roar");
-        showBanner("APEX MUTANT", "A giant mutant has breached the perimeter!", BANNER_BOSS);
-        shake(5, 30);
+        showBanner("APEX MUTANT", "GIANT MUTANT BREACHED - HIT ON BEAT TO CRUSH IT!", BANNER_BOSS);
+        shake(8, 30);
+        triggerScreenFlash(new Color(255, 60, 60, 80), 10);
     }
 
-    // ------------------------------------------------------------------ player
+    // ------------------------------------------------------------------ player & rhythm auto-run
     private void updatePlayer() {
         if (!player.isAlive()) {
             player.update();   // only the death animation
@@ -751,19 +826,102 @@ public final class GamePanel extends JPanel
         }
         double aimX = getMouseWorldX(), aimY = getMouseWorldY();
         handleActionRequests(aimX, aimY);
-        player.setMoveInput(keyUp, keyDown, keyLeft, keyRight);
-        Monster target = autoFire && !mouseFiring ? findAutoFireTarget() : null;
-        if (target != null) {
-            player.setAim(target.getX(), target.getY());
+
+        // Auto-runner advances continuously along waypoints; WASD dodges laterally around hazards.
+        player.setMoveInput(false, false, false, false);
+        Monster autoTarget = (autoFire && !mouseFiring) ? findAutoFireTarget() : null;
+        if (autoTarget != null) {
+            player.setAim(autoTarget.getX(), autoTarget.getY());
         } else {
             player.setAim(aimX, aimY);
         }
+        double prevX = player.getX(), prevY = player.getY();
         player.update();
-        if (mouseFiring) {
-            fireAt(aimX, aimY);
-        } else if (target != null) {
-            fireAt(target.getX(), target.getY());
+        updateAutoRunMovement(prevX, prevY);
+
+        int beatIdx = (elapsedTicks + GameData.HALF_BEAT_TICKS) / GameData.BEAT_TICKS;
+        if (beatShotRequested) {
+            beatShotRequested = false;
+            boolean useAutoLock = spaceAimTarget;
+            spaceAimTarget = false;
+            double tx = aimX, ty = aimY;
+            if (useAutoLock) {
+                Monster lock = findRhythmLockTarget();
+                if (lock != null) {
+                    tx = lock.getX();
+                    ty = lock.getY();
+                }
+            }
+            player.setAim(tx, ty);
+            fireRhythmAt(tx, ty, beatIdx);
+        } else if (getTicksFromNearestBeat() <= 1 && lastAutoBeatFired != beatIdx) {
+            if (mouseFiring) {
+                lastAutoBeatFired = beatIdx;
+                player.setAim(aimX, aimY);
+                fireRhythmAt(aimX, aimY, beatIdx);
+            } else if (autoTarget != null) {
+                lastAutoBeatFired = beatIdx;
+                fireRhythmAt(autoTarget.getX(), autoTarget.getY(), beatIdx);
+            }
         }
+    }
+
+    private void updateAutoRunMovement(double prevX, double prevY) {
+        int wpCount = Math.max(1, map.getWaypointCount());
+        Point wp = map.getWaypoint(waypointIndex);
+        if (Math.hypot(wp.x - player.getX(), wp.y - player.getY()) < 26.0) {
+            int finished = waypointIndex;
+            waypointIndex = (waypointIndex + 1) % wpCount;
+            if (finished == wpCount - 1) {
+                onLapCompleted();
+            }
+            wp = map.getWaypoint(waypointIndex);
+        }
+        double angle = map.hasClearPath(player.getX(), player.getY(), wp.x, wp.y, player.getWidth())
+                ? Math.atan2(wp.y - player.getY(), wp.x - player.getX())
+                : map.getChaseAngle(player.getX(), player.getY(), wp.x, wp.y, player.getWidth());
+
+        int manualX = (keyRight ? 1 : 0) - (keyLeft ? 1 : 0);
+        int manualY = (keyDown ? 1 : 0) - (keyUp ? 1 : 0);
+        double vx = Math.cos(angle) + manualX * 0.72;
+        double vy = Math.sin(angle) + manualY * 0.72;
+        double len = Math.hypot(vx, vy);
+        double speed = player.getMoveSpeed() * (isFeverActive() ? 1.25 : 1.0);
+        if (len > 0.01) {
+            player.moveAutoRun(vx / len * speed, vy / len * speed);
+        }
+        if (Math.hypot(player.getX() - prevX, player.getY() - prevY) < 0.25) {
+            stuckTicks++;
+            if (stuckTicks > 40) {
+                waypointIndex = (waypointIndex + 1) % wpCount;
+                stuckTicks = 0;
+            }
+        } else {
+            stuckTicks = 0;
+        }
+        if (elapsedTicks % (isFeverActive() ? 4 : 8) == 0) {
+            addEffect(new Effect(Effect.Kind.AFTERIMAGE, player.getX(), player.getFeetY() - 8,
+                    0, 0, 0, 0, 12, null,
+                    isFeverActive() ? new Color(255, 220, 60, 140) : new Color(60, 225, 255, 105),
+                    isFeverActive() ? 12 : 9));
+        }
+    }
+
+    private void onLapCompleted() {
+        lapsCompleted++;
+        int healBefore = player.getHp();
+        player.heal(25);
+        int gainedHp = player.getHp() - healBefore;
+        player.addInventory(GameData.ItemType.AMMO, 25);
+        player.addInventory(GameData.ItemType.SCRAPS, 3);
+        rhythmBonusScore += 250 * (1 + lapsCompleted);
+        AssetLoader.playSound("wave");
+        shake(5.5, 16);
+        zoomKick = Math.min(0.14, zoomKick + 0.06);
+        triggerScreenFlash(new Color(80, 240, 180, 75), 10);
+        spawnShockwaveAndSparks(player.getX(), player.getY(), new Color(90, 245, 180), 42, 16);
+        String msg = "+" + gainedHp + " HP / +25 AMMO / +3 SCRAPS";
+        showBanner("LAP " + lapsCompleted + " COMPLETE!", msg, BANNER_WAVE);
     }
 
     /** Key presses that change the world are only remembered by the Swing thread and done here. */
@@ -807,15 +965,147 @@ public final class GamePanel extends JPanel
         }
     }
 
-    private void fireAt(double targetX, double targetY) {
-        List<Bullet> shots = player.shoot(targetX, targetY);
+    private Monster findRhythmLockTarget() {
+        Monster best = null;
+        double bestDist = 300.0;
+        for (Monster m : monsters) {
+            if (!m.isAlive()) {
+                continue;
+            }
+            double d = player.distanceTo(m);
+            if (d < bestDist && map.hasClearPath(player.getX(), player.getY(), m.getX(), m.getY(), 4)) {
+                bestDist = d;
+                best = m;
+            }
+        }
+        return best;
+    }
+
+    private void fireRhythmAt(double targetX, double targetY, int beatIdx) {
+        GameData.RhythmJudge judge = judgeCurrentTiming();
+        boolean fever = isFeverActive();
+        List<Bullet> shots = player.shootRhythm(targetX, targetY, judge, fever);
         if (shots.isEmpty()) {
             return;
         }
         bullets.addAll(shots);
         GameData.WeaponType w = player.getCurrentWeapon();
-        if (w.damage >= 30 && !w.melee) {
-            shake(1.5, 6);   // heavy guns kick the camera a little
+        double hx = player.getHandX(), hy = player.getHandY();
+        double angle = Math.atan2(targetY - hy, targetX - hx);
+        boolean freshBeat = lastRhythmBeatScored != beatIdx;
+
+        if (judge == GameData.RhythmJudge.OFF_BEAT) {
+            combo = 0;
+            offBeatHits++;
+            lastJudge = judge;
+            lastJudgeTick = tickCount;
+            AssetLoader.playSound("off_beat");
+            shake(1.2, 4);
+            addText(player.getX(), player.getY() - 26, judge.label, new Color(165, 165, 175));
+            return;
+        }
+
+        if (freshBeat) {
+            lastRhythmBeatScored = beatIdx;
+            combo++;
+            maxCombo = Math.max(maxCombo, combo);
+            if (judge == GameData.RhythmJudge.PERFECT) {
+                perfectHits++;
+            } else if (judge == GameData.RhythmJudge.GREAT) {
+                greatHits++;
+            } else {
+                goodHits++;
+            }
+            int mult = getComboMultiplier();
+            int gain = judge.basePoints * mult * (fever ? 2 : 1);
+            rhythmBonusScore += gain;
+            if (!fever) {
+                feverCharge = Math.min(GameData.FEVER_MAX, feverCharge + judge.feverDelta);
+            }
+            lastJudge = judge;
+            lastJudgeTick = tickCount;
+            addText(player.getX(), player.getY() - 28, judge.label + " +" + gain, judgeColor(judge));
+        }
+
+        double mx = hx + Math.cos(angle) * 14, my = hy + Math.sin(angle) * 14;
+        if (judge == GameData.RhythmJudge.PERFECT) {
+            AssetLoader.playSound("perfect_hit");
+            double kick = (w.damage >= 30 ? 7.5 : 5.5) * (fever ? 1.25 : 1.0);
+            recoilX -= Math.cos(angle) * (fever ? 7.0 : 5.0);
+            recoilY -= Math.sin(angle) * (fever ? 7.0 : 5.0);
+            shake(kick, 11);
+            zoomKick = Math.min(0.15, zoomKick + (fever ? 0.055 : 0.04));
+            triggerScreenFlash(fever ? new Color(255, 220, 60, 62) : new Color(55, 240, 255, 48), 5);
+            spawnShockwaveAndSparks(mx, my, fever ? new Color(255, 225, 65) : new Color(75, 240, 255),
+                    fever ? 28 : 22, fever ? 12 : 9);
+            if (!w.melee) {
+                double beamDist = Math.min(w.range, Math.hypot(targetX - mx, targetY - my) + 60);
+                addEffect(new Effect(Effect.Kind.BEAM, mx, my,
+                        mx + Math.cos(angle) * beamDist, my + Math.sin(angle) * beamDist,
+                        0, 0, 6, null, fever ? new Color(255, 230, 80) : new Color(90, 245, 255), fever ? 4 : 3));
+            }
+        } else if (judge == GameData.RhythmJudge.GREAT) {
+            recoilX -= Math.cos(angle) * 3.0;
+            recoilY -= Math.sin(angle) * 3.0;
+            shake(3.5, 8);
+            zoomKick = Math.min(0.15, zoomKick + 0.025);
+            spawnShockwaveAndSparks(mx, my, new Color(80, 235, 255), 16, 6);
+        } else {
+            recoilX -= Math.cos(angle) * 1.5;
+            recoilY -= Math.sin(angle) * 1.5;
+            shake(2.0, 5);
+            spawnDirectionalSparks(mx, my, angle, judgeColor(judge), 3);
+        }
+
+        if (!fever && feverCharge >= GameData.FEVER_MAX) {
+            activateFeverOverdrive();
+        }
+    }
+
+    private void activateFeverOverdrive() {
+        feverCharge = 0;
+        feverTicks = GameData.FEVER_DURATION_TICKS;
+        AssetLoader.playSound("fever");
+        showBanner("FEVER OVERDRIVE!", "INFINITE AMMO / 2X SCORE / TURBO BEAT!", new Color(255, 220, 55));
+        shake(11.0, 24);
+        zoomKick = 0.14;
+        triggerScreenFlash(new Color(255, 220, 65, 115), 14);
+        spawnShockwaveAndSparks(player.getX(), player.getY(), new Color(255, 225, 65), 60, 28);
+        for (Monster m : monsters) {
+            if (m.isAlive() && m.distanceTo(player) <= 95.0) {
+                boolean killed = m.takeHit(25, Math.atan2(m.getY() - player.getY(), m.getX() - player.getX()), 9);
+                addText(m.getX(), m.getY() - m.getHeight(), "25!", TEXT_KILL);
+                if (killed) {
+                    onMonsterKilled(m);
+                }
+            }
+        }
+    }
+
+    private void triggerScreenFlash(Color color, int ticks) {
+        screenFlashColor = color;
+        screenFlashTicks = ticks;
+        screenFlashMax = Math.max(1, ticks);
+    }
+
+    private void spawnShockwaveAndSparks(double x, double y, Color color, int radius, int sparkCount) {
+        addEffect(new Effect(Effect.Kind.SHOCKWAVE, x, y, 0, 0, 0, 0, 14, null, color, radius));
+        for (int i = 0; i < sparkCount; i++) {
+            double ang = rng.nextDouble() * Math.PI * 2;
+            double spd = 1.6 + rng.nextDouble() * 3.6;
+            addEffect(new Effect(Effect.Kind.SPARK, x, y, 0, 0,
+                    Math.cos(ang) * spd, Math.sin(ang) * spd,
+                    10 + rng.nextInt(8), null, color, 2 + rng.nextInt(3)));
+        }
+    }
+
+    private void spawnDirectionalSparks(double x, double y, double baseAngle, Color color, int sparkCount) {
+        for (int i = 0; i < sparkCount; i++) {
+            double ang = baseAngle + (rng.nextDouble() - 0.5) * 0.9;
+            double spd = 2.0 + rng.nextDouble() * 3.5;
+            addEffect(new Effect(Effect.Kind.SPARK, x, y, 0, 0,
+                    Math.cos(ang) * spd, Math.sin(ang) * spd,
+                    9 + rng.nextInt(6), null, color, 2));
         }
     }
 
@@ -841,12 +1131,14 @@ public final class GamePanel extends JPanel
         return best;
     }
 
-    /** Damages the player (armour and mercy time apply) with a red number and a camera shake. */
+    /** Damages the player (armour and mercy time apply) with a red number, combo break, and heavy shake. */
     private int hurtPlayer(int damage) {
         int dealt = player.takeDamage(damage);
         if (dealt > 0) {
+            combo = 0;
             addText(player.getX(), player.getY() - 22, "-" + dealt, TEXT_HURT);
-            shake(3, 10);
+            shake(5.5, 14);
+            triggerScreenFlash(new Color(220, 35, 35, 85), 8);
         }
         return dealt;
     }
@@ -871,14 +1163,26 @@ public final class GamePanel extends JPanel
         monsters.removeIf(Monster::isRemovable);
     }
 
-    /** Score, loot and (for the boss) a big moment. */
+    /** Score, loot, shockwave, sparks, and heavy kill shake. */
     private void onMonsterKilled(Monster m) {
         kills++;
-        killScore += m.getType().score;
+        int mult = getComboMultiplier() * (isFeverActive() ? 2 : 1);
+        killScore += m.getType().score * mult;
         drops.addAll(m.rollDrops(rng, player.getLootBonus()));
-        if (m.getType() == GameData.MonsterType.ZOMBIE_BOSS) {
-            showBanner("BOSS DOWN!", "It dropped a supply chest", BANNER_WAVE);
-            shake(6, 30);
+        if (!isFeverActive()) {
+            feverCharge = Math.min(GameData.FEVER_MAX, feverCharge + 6);
+            if (feverCharge >= GameData.FEVER_MAX) {
+                activateFeverOverdrive();
+            }
+        }
+        boolean boss = m.getType() == GameData.MonsterType.ZOMBIE_BOSS;
+        shake(boss ? 14.0 : (isFeverActive() ? 8.0 : 5.5), boss ? 32 : 13);
+        zoomKick = Math.min(0.16, zoomKick + (boss ? 0.10 : 0.04));
+        triggerScreenFlash(boss ? new Color(255, 220, 60, 120) : new Color(255, 150, 50, 42), boss ? 14 : 5);
+        spawnShockwaveAndSparks(m.getX(), m.getY(), boss ? new Color(255, 220, 60) : new Color(255, 130, 55),
+                boss ? 56 : 26, boss ? 30 : 14);
+        if (boss) {
+            showBanner("BOSS DOWN!", "MASSIVE BEAT BONUS + SUPPLY CHEST", BANNER_WAVE);
         }
     }
 
@@ -926,6 +1230,10 @@ public final class GamePanel extends JPanel
                 if (!b.isMelee()) {
                     addImpact(b);
                 }
+                int tier = b.getRhythmTier();
+                Color sparkCol = tier >= 3 ? new Color(255, 225, 65)
+                        : (tier == 2 ? new Color(75, 240, 255) : new Color(255, 190, 95));
+                spawnDirectionalSparks(m.getX(), m.getY() - 4, b.getAngle() + Math.PI, sparkCol, tier >= 2 ? 10 : 5);
                 if (killed) {
                     onMonsterKilled(m);
                 }
@@ -936,8 +1244,11 @@ public final class GamePanel extends JPanel
     /** Rockets and grenades: damage every monster inside the blast and push it away from the centre. */
     private void explode(double x, double y, int radius, int damage) {
         addEffect(new Effect(Effect.Kind.EXPLOSION, x, y, 28, null, null, Math.max(48, radius * 2)));
+        spawnShockwaveAndSparks(x, y, new Color(255, 165, 50), Math.max(36, radius), 22);
         AssetLoader.playSound("explosion");
-        shake(6, 18);
+        shake(9.5, 20);
+        zoomKick = Math.min(0.16, zoomKick + 0.08);
+        triggerScreenFlash(new Color(255, 175, 60, 75), 8);
         for (Monster m : monsters) {
             if (!m.isAlive() || m.distanceTo(x, y) > radius + m.getWidth() / 2.0) {
                 continue;
@@ -974,6 +1285,11 @@ public final class GamePanel extends JPanel
             e.age++;
             if (e.kind == Effect.Kind.TEXT) {
                 e.y -= 0.45;   // floating numbers drift upwards
+            } else if (e.kind == Effect.Kind.SPARK) {
+                e.x += e.vx;
+                e.y += e.vy;
+                e.vx *= 0.88;
+                e.vy *= 0.88;
             }
         }
         effects.removeIf(e -> e.age >= e.life);
@@ -986,6 +1302,12 @@ public final class GamePanel extends JPanel
             shakeX = 0;
             shakeY = 0;
         }
+        zoomKick *= 0.85;
+        recoilX *= 0.80;
+        recoilY *= 0.80;
+        if (screenFlashTicks > 0) {
+            screenFlashTicks--;
+        }
     }
 
     /** The little spark where a bullet stopped. */
@@ -994,7 +1316,8 @@ public final class GamePanel extends JPanel
     }
 
     private void addEffect(Effect e) {
-        if (effects.size() < MAX_EFFECTS || e.kind == Effect.Kind.EXPLOSION) {
+        if (effects.size() < MAX_EFFECTS || e.kind == Effect.Kind.EXPLOSION
+                || e.kind == Effect.Kind.SHOCKWAVE || e.kind == Effect.Kind.TEXT) {
             effects.add(e);
         }
     }
@@ -1138,10 +1461,80 @@ public final class GamePanel extends JPanel
         return kills;
     }
 
-    /** Kill points + 2 per second survived + 1000 for surviving, scaled by difficulty (1: x0.75 ... 5: x1.75). */
+    /** Kill points + rhythm timing points + 2 per second survived + 1000 for surviving, scaled by difficulty. */
     public int getScore() {
-        double base = killScore + getElapsedSeconds() * 2 + (won ? 1000 : 0);
+        double base = killScore + rhythmBonusScore + getElapsedSeconds() * 2 + (won ? 1000 : 0);
         return (int) Math.round(base * (0.5 + 0.25 * getDifficulty()));
+    }
+
+    public double getBeatPhase() {
+        return (elapsedTicks % GameData.BEAT_TICKS) / (double) GameData.BEAT_TICKS;
+    }
+
+    public int getTicksFromNearestBeat() {
+        int mod = elapsedTicks % GameData.BEAT_TICKS;
+        return Math.min(mod, GameData.BEAT_TICKS - mod);
+    }
+
+    public boolean isInPerfectWindow() {
+        return getTicksFromNearestBeat() <= GameData.PERFECT_WINDOW_TICKS;
+    }
+
+    public GameData.RhythmJudge judgeCurrentTiming() {
+        int d = getTicksFromNearestBeat();
+        if (d <= GameData.PERFECT_WINDOW_TICKS) {
+            return GameData.RhythmJudge.PERFECT;
+        }
+        if (d <= GameData.GREAT_WINDOW_TICKS) {
+            return GameData.RhythmJudge.GREAT;
+        }
+        if (d <= GameData.GOOD_WINDOW_TICKS) {
+            return GameData.RhythmJudge.GOOD;
+        }
+        return GameData.RhythmJudge.OFF_BEAT;
+    }
+
+    public boolean isFeverActive() {
+        return feverTicks > 0;
+    }
+
+    public int getFeverPercent() {
+        if (feverTicks > 0) {
+            return feverTicks * 100 / GameData.FEVER_DURATION_TICKS;
+        }
+        return feverCharge * 100 / GameData.FEVER_MAX;
+    }
+
+    public int getCombo() {
+        return combo;
+    }
+
+    public int getMaxCombo() {
+        return maxCombo;
+    }
+
+    public int getComboMultiplier() {
+        return Math.min(4, 1 + combo / 10);
+    }
+
+    public int getLapsCompleted() {
+        return lapsCompleted;
+    }
+
+    public int getPerfectHits() {
+        return perfectHits;
+    }
+
+    public int getGreatHits() {
+        return greatHits;
+    }
+
+    public int getGoodHits() {
+        return goodHits;
+    }
+
+    public int getOffBeatHits() {
+        return offBeatHits;
     }
 
     public int getElapsedSeconds() {
@@ -1208,11 +1601,13 @@ public final class GamePanel extends JPanel
     }
 
     private double getMouseWorldX() {
-        return camX + mouseX / (double) SCALE;
+        double unzoomed = (mouseX - getViewWidth() / 2.0) / Math.max(0.5, currentZoom) + getViewWidth() / 2.0;
+        return camX + unzoomed / SCALE;
     }
 
     private double getMouseWorldY() {
-        return camY + mouseY / (double) SCALE;
+        double unzoomed = (mouseY - getViewHeight() / 2.0) / Math.max(0.5, currentZoom) + getViewHeight() / 2.0;
+        return camY + unzoomed / SCALE;
     }
 
     /** The part of the world the camera shows, in world pixels. */
@@ -1237,6 +1632,11 @@ public final class GamePanel extends JPanel
             return;
         }
         switch (code) {
+            case KeyEvent.VK_SPACE:
+            case KeyEvent.VK_F:
+                beatShotRequested = true;
+                spaceAimTarget = true;
+                break;
             case KeyEvent.VK_G:
                 grenadeRequested = true;
                 break;
@@ -1292,6 +1692,8 @@ public final class GamePanel extends JPanel
         if (SwingUtilities.isRightMouseButton(e) || e.isControlDown()) {
             grenadeRequested = true;
         } else if (SwingUtilities.isLeftMouseButton(e)) {
+            beatShotRequested = true;
+            spaceAimTarget = false;
             mouseFiring = true;
         }
     }
@@ -1358,11 +1760,6 @@ public final class GamePanel extends JPanel
 
     private void openWorkshop() {
         if (frame != null && !gameOver && player.isAlive()) {
-            if (!isPlayerInBase()) {
-                player.showHint("Return to Base Camp (green icon) to talk to NPCs!");
-                AssetLoader.playSound("click");
-                return;
-            }
             // let this key event finish first; the modal dialog then runs its own event loop
             SwingUtilities.invokeLater(frame::openUpgradeDialog);
         }
@@ -1394,19 +1791,33 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Ground, then props and entities sorted by their feet (so you can walk behind a tent), then effects. */
+    /** Ground, auto-run beat track, sorted props/entities, monsters' beat rings, and effects. */
     private void drawWorld(Graphics2D g2) {
-        double viewX = camX + shakeX, viewY = camY + shakeY;
+        double viewX = camX + shakeX + recoilX, viewY = camY + shakeY + recoilY;
         originX = (int) Math.round(viewX * SCALE);
         originY = (int) Math.round(viewY * SCALE);
-        Rectangle view = new Rectangle((int) Math.floor(viewX), (int) Math.floor(viewY),
-                getViewWidth() / SCALE + 2, getViewHeight() / SCALE + 2);
+        double beatPulseZoom = (1.0 - getBeatPhase()) * (isFeverActive() ? 0.018 : 0.008);
+        currentZoom = 1.0 + zoomKick + beatPulseZoom;
+        int vw = getViewWidth(), vh = getViewHeight();
+        Rectangle view = new Rectangle((int) Math.floor(viewX) - 24, (int) Math.floor(viewY) - 24,
+                vw / SCALE + 52, vh / SCALE + 52);
         AffineTransform old = g2.getTransform();
+        g2.translate(vw / 2.0, vh / 2.0);
+        g2.scale(currentZoom, currentZoom);
+        g2.translate(-vw / 2.0, -vh / 2.0);
         g2.translate(-originX, -originY);
         g2.scale(SCALE, SCALE);
 
         map.drawGround(g2, view);
         drawCampPerimeter(g2, view);
+        drawAutoRunTrack(g2, view);
+        double beatPhase = getBeatPhase();
+        boolean perfectWin = isInPerfectWindow();
+        for (Monster m : monsters) {
+            if (m.isAlive() && view.contains(m.getX(), m.getY())) {
+                m.drawBeatTargetRing(g2, beatPhase, perfectWin);
+            }
+        }
         collectVisible(view);
         drawList.sort(GameMap.DEPTH_ORDER);
         for (GameMap.Drawable d : drawList) {
@@ -1417,6 +1828,37 @@ public final class GamePanel extends JPanel
         }
         drawWorldEffects(g2);
         g2.setTransform(old);
+    }
+
+    /** Glowing neon waypoints & scrolling floor chevrons showing the runner's next turns. */
+    private void drawAutoRunTrack(Graphics2D g2, Rectangle view) {
+        int wpCount = map.getWaypointCount();
+        if (wpCount <= 0) {
+            return;
+        }
+        Stroke oldStroke = g2.getStroke();
+        Color trackCol = isFeverActive() ? new Color(255, 220, 60, 110) : new Color(60, 225, 255, 95);
+        g2.setColor(trackCol);
+        g2.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                1f, new float[]{4f, 6f}, Math.max(0f, 10f - (float) ((elapsedTicks * 0.5) % 10.0))));
+        double px = player.getX(), py = player.getFeetY() - 2;
+        int preview = Math.min(4, wpCount);
+        for (int i = 0; i < preview; i++) {
+            Point wp = map.getWaypoint((waypointIndex + i) % wpCount);
+            if (view.intersectsLine(px, py, wp.x, wp.y)) {
+                g2.drawLine((int) px, (int) py, wp.x, wp.y);
+            }
+            px = wp.x;
+            py = wp.y;
+        }
+        Point cur = map.getWaypoint(waypointIndex);
+        if (view.contains(cur.x, cur.y)) {
+            int pulse = 8 + (int) ((1.0 - getBeatPhase()) * 6);
+            g2.setStroke(new BasicStroke(1.8f));
+            g2.setColor(isFeverActive() ? new Color(255, 230, 80, 175) : new Color(80, 240, 255, 165));
+            g2.drawOval(cur.x - pulse, cur.y - pulse / 2, pulse * 2, pulse);
+        }
+        g2.setStroke(oldStroke);
     }
 
     /** Subtle perimeter outline around Base Camp (green during Scavenge safe phase, red/orange during Raid). */
@@ -1473,32 +1915,75 @@ public final class GamePanel extends JPanel
         }
     }
 
-    /** Explosions and bullet impacts, in world coordinates. */
+    /** Explosions, impacts, neon beams, shockwaves, sparks, and runner afterimages in world space. */
     private void drawWorldEffects(Graphics2D g2) {
+        Composite oldComp = g2.getComposite();
+        Stroke oldStroke = g2.getStroke();
         for (Effect e : effects) {
-            BufferedImage[] frames;
-            if (e.kind == Effect.Kind.EXPLOSION) {
-                frames = explosionFrames;
-            } else if (e.kind == Effect.Kind.IMPACT) {
-                frames = impactFrames;
-            } else {
-                continue;
+            float progress = Math.min(1f, e.age / (float) e.life);
+            float alpha = Math.max(0f, 1f - progress);
+            if (e.kind == Effect.Kind.EXPLOSION || e.kind == Effect.Kind.IMPACT) {
+                BufferedImage[] frames = (e.kind == Effect.Kind.EXPLOSION) ? explosionFrames : impactFrames;
+                BufferedImage img = frames[Math.min(frames.length - 1, e.age * frames.length / e.life)];
+                int half = e.size / 2;
+                g2.drawImage(img, (int) e.x - half, (int) e.y - half, e.size, e.size, null);
+            } else if (e.kind == Effect.Kind.SHOCKWAVE) {
+                double r = e.size * (0.25 + 1.15 * progress);
+                Color c = e.color != null ? e.color : Theme.GOLD;
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.min(1f, alpha * 0.9f)));
+                g2.setColor(c);
+                g2.setStroke(new BasicStroke(Math.max(0.8f, 2.8f * alpha)));
+                g2.drawOval((int) (e.x - r), (int) (e.y - r), (int) (r * 2), (int) (r * 2));
+                g2.setColor(Color.WHITE);
+                g2.setStroke(new BasicStroke(Math.max(0.4f, 1.1f * alpha)));
+                g2.drawOval((int) (e.x - r * 0.85), (int) (e.y - r * 0.85), (int) (r * 1.7), (int) (r * 1.7));
+            } else if (e.kind == Effect.Kind.BEAM) {
+                Color c = e.color != null ? e.color : new Color(80, 240, 255);
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                g2.setColor(c);
+                g2.setStroke(new BasicStroke(Math.max(0.8f, (e.size * 1.4f) * alpha), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine((int) e.x, (int) e.y, (int) e.x2, (int) e.y2);
+                g2.setColor(Color.WHITE);
+                g2.setStroke(new BasicStroke(Math.max(0.4f, 1.3f * alpha), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine((int) e.x, (int) e.y, (int) e.x2, (int) e.y2);
+            } else if (e.kind == Effect.Kind.SPARK) {
+                Color c = e.color != null ? e.color : Theme.GOLD;
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                g2.setColor(c);
+                g2.setStroke(new BasicStroke(Math.max(0.8f, e.size * alpha), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                g2.drawLine((int) (e.x - e.vx * 1.8), (int) (e.y - e.vy * 1.8), (int) e.x, (int) e.y);
+                g2.setColor(Color.WHITE);
+                g2.fillOval((int) e.x - 1, (int) e.y - 1, 2, 2);
+            } else if (e.kind == Effect.Kind.AFTERIMAGE) {
+                Color c = e.color != null ? e.color : new Color(70, 225, 255);
+                g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha * 0.45f));
+                g2.setColor(c);
+                g2.fillOval((int) e.x - e.size / 2, (int) e.y - e.size, e.size, e.size * 2);
             }
-            BufferedImage img = frames[Math.min(frames.length - 1, e.age * frames.length / e.life)];
-            int half = e.size / 2;
-            g2.drawImage(img, (int) e.x - half, (int) e.y - half, e.size, e.size, null);
         }
+        g2.setStroke(oldStroke);
+        g2.setComposite(oldComp);
     }
 
-    /** Damage numbers, pickup labels, and base NPC interaction prompts in sharp screen pixels. */
+    private int worldToScreenX(double wx) {
+        double unzoomed = wx * SCALE - originX;
+        return (int) Math.round((unzoomed - getViewWidth() / 2.0) * currentZoom + getViewWidth() / 2.0);
+    }
+
+    private int worldToScreenY(double wy) {
+        double unzoomed = wy * SCALE - originY;
+        return (int) Math.round((unzoomed - getViewHeight() / 2.0) * currentZoom + getViewHeight() / 2.0);
+    }
+
+    /** Damage numbers, rhythm judgments, pickup labels, and base NPC prompts in sharp screen pixels. */
     private void drawFloatingTexts(Graphics2D g2) {
         Point trader = map.getTraderPosition();
         if (!gameOver && player.distanceTo(trader.x, trader.y) < 125) {
             String prompt = "PRESS B - CAMP NPC";
             int pw = Theme.pixelWidth(prompt, 2) + 16;
             int ph = 20;
-            int tx = trader.x * SCALE - originX - pw / 2;
-            int ty = Math.max(8, (trader.y - 26) * SCALE - originY);
+            int tx = worldToScreenX(trader.x) - pw / 2;
+            int ty = Math.max(8, worldToScreenY(trader.y - 26));
             Theme.paintPanel(g2, Theme.Panel.GLASS, tx, ty, pw, ph, 1);
             Theme.drawPixelTextShadow(g2, prompt, tx + 8, ty + 5, 2, Theme.GOLD);
         }
@@ -1509,9 +1994,10 @@ public final class GamePanel extends JPanel
             }
             float left = 1f - e.age / (float) e.life;
             g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.min(1f, left * 2.5f)));
-            int sx = (int) Math.round(e.x * SCALE) - originX - Theme.pixelWidth(e.text, 2) / 2;
-            int sy = (int) Math.round(e.y * SCALE) - originY - 10;
-            Theme.drawPixelTextShadow(g2, e.text, sx, sy, 2, e.color);   // the kit's pixel font
+            String msg = e.text == null ? "" : e.text.toUpperCase();
+            int sx = worldToScreenX(e.x) - Theme.pixelWidth(msg, 2) / 2;
+            int sy = worldToScreenY(e.y) - 10;
+            Theme.drawPixelTextShadow(g2, msg, sx, sy, 2, e.color);
         }
         g2.setComposite(old);
     }
@@ -1520,6 +2006,8 @@ public final class GamePanel extends JPanel
     private void drawOverlay(Graphics2D g2) {
         drawNightLighting(g2);
         drawDangerTint(g2);
+        drawScreenFlash(g2);
+        drawFeverBorder(g2);
         drawBanner(g2);
         drawMiniMap(g2);
         if (gameOver) {
@@ -1527,12 +2015,144 @@ public final class GamePanel extends JPanel
             return;
         }
         drawBossBar(g2);
+        drawComboAndFeverHud(g2);
+        drawBeatHighwayBar(g2);
         drawHint(g2);
         if (paused) {
             drawPauseScreen(g2);
         } else if (mouseInside) {
             drawCrosshair(g2);
         }
+    }
+
+    private void drawScreenFlash(Graphics2D g2) {
+        if (screenFlashTicks <= 0 || screenFlashColor == null) {
+            return;
+        }
+        float ratio = screenFlashTicks / (float) Math.max(1, screenFlashMax);
+        int alpha = Math.max(0, Math.min(180, Math.round(screenFlashColor.getAlpha() * ratio)));
+        g2.setColor(new Color(screenFlashColor.getRed(), screenFlashColor.getGreen(), screenFlashColor.getBlue(), alpha));
+        g2.fillRect(0, 0, getViewWidth(), getViewHeight());
+    }
+
+    private void drawFeverBorder(Graphics2D g2) {
+        int w = getViewWidth(), h = getViewHeight();
+        boolean fever = isFeverActive();
+        if (!fever && !isInPerfectWindow()) {
+            return;
+        }
+        Stroke old = g2.getStroke();
+        double pulse = 1.0 - getBeatPhase();
+        if (fever) {
+            int glowAlpha = 70 + (int) (pulse * 110);
+            g2.setColor(new Color(255, 210, 45, glowAlpha));
+            g2.setStroke(new BasicStroke(6f));
+            g2.drawRect(3, 3, w - 6, h - 6);
+            g2.setColor(new Color(255, 80, 195, glowAlpha / 2));
+            g2.setStroke(new BasicStroke(12f));
+            g2.drawRect(6, 6, w - 12, h - 12);
+            // Animated corner beat equalizer bars during Fever Overdrive
+            for (int i = 0; i < 8; i++) {
+                double barPhase = (getBeatPhase() + i * 0.14) % 1.0;
+                int bh = 10 + (int) ((1.0 - Math.abs(barPhase - 0.5) * 2.0) * 28);
+                g2.setColor(i % 2 == 0 ? new Color(255, 220, 60, 190) : new Color(255, 95, 200, 180));
+                g2.fillRect(14 + i * 8, h - 14 - bh, 5, bh);
+                g2.fillRect(w - 19 - i * 8, h - 14 - bh, 5, bh);
+            }
+        } else {
+            g2.setColor(new Color(65, 235, 255, 45));
+            g2.setStroke(new BasicStroke(3f));
+            g2.drawRect(2, 2, w - 4, h - 4);
+        }
+        g2.setStroke(old);
+    }
+
+    private void drawComboAndFeverHud(Graphics2D g2) {
+        boolean fever = isFeverActive();
+        int x = 14, y = 14, w = 228, h = 78;
+        Theme.paintPanel(g2, Theme.Panel.GLASS, x, y, w, h, 1);
+
+        Color comboCol = fever ? new Color(255, 225, 65) : (combo >= 10 ? new Color(80, 240, 255) : Theme.TEXT);
+        String comboTxt = combo > 0 ? ("COMBO " + combo + "X") : "125 BPM RUN";
+        Theme.drawPixelTextShadow(g2, comboTxt, x + 12, y + 10, 3, comboCol);
+
+        String meta = "MULT " + getComboMultiplier() + "X   LAP " + (lapsCompleted + 1);
+        Theme.drawPixelTextShadow(g2, meta, x + 12, y + 32, 2, Theme.TEXT_2);
+
+        String feverLabel = fever ? "FEVER OVERDRIVE!" : ("FEVER " + getFeverPercent() + "%");
+        Theme.drawPixelTextShadow(g2, feverLabel, x + 12, y + 48, 2, fever ? Theme.GOLD : new Color(255, 185, 65));
+
+        int bx = x + 12, by = y + 63, bw = w - 24, bh = 8;
+        g2.setColor(new Color(20, 22, 30, 220));
+        g2.fillRect(bx, by, bw, bh);
+        int fillW = bw * getFeverPercent() / 100;
+        if (fillW > 0) {
+            g2.setColor(fever ? new Color(255, 215, 50) : new Color(65, 225, 255));
+            g2.fillRect(bx, by, fillW, bh);
+        }
+        g2.setColor(new Color(220, 230, 245, 90));
+        g2.drawRect(bx, by, bw, bh);
+
+        if (lastJudge != null && tickCount - lastJudgeTick < 36) {
+            String j = lastJudge.label;
+            int scale = lastJudge == GameData.RhythmJudge.PERFECT ? 3 : 2;
+            Theme.drawPixelTextShadow(g2, j, x + 12, y + h + 8, scale, judgeColor(lastJudge));
+        }
+    }
+
+    private static Color judgeColor(GameData.RhythmJudge j) {
+        switch (j) {
+            case PERFECT: return new Color(255, 225, 65);
+            case GREAT: return new Color(75, 240, 255);
+            case GOOD: return new Color(135, 230, 120);
+            default: return new Color(175, 175, 185);
+        }
+    }
+
+    private void drawBeatHighwayBar(Graphics2D g2) {
+        int vw = getViewWidth(), vh = getViewHeight();
+        int barW = 350, barH = 44;
+        int x = (vw - barW) / 2;
+        int y = vh - barH - 12;
+        Theme.paintPanel(g2, Theme.Panel.GLASS, x, y, barW, barH, 1);
+
+        int cx = x + barW / 2;
+        int laneY = y + 14;
+        int halfW = barW / 2 - 22;
+
+        // Track horizontal guide line
+        g2.setColor(new Color(95, 110, 130, 150));
+        g2.fillRect(cx - halfW, laneY - 1, halfW * 2, 2);
+
+        // Moving incoming beat bars gliding from left and right toward center target
+        double phase = getBeatPhase();   // 0..1 between beats; 0 & 1 = exact beat
+        boolean perfectWin = isInPerfectWindow();
+        boolean fever = isFeverActive();
+        for (int b = 0; b < 3; b++) {
+            double frac = ((1.0 - phase) + b) / 3.0;
+            int off = (int) Math.round(frac * halfW);
+            int alpha = Math.max(45, (int) (255 * (1.0 - frac * 0.72)));
+            Color barCol = fever ? new Color(255, 220, 60, alpha) : new Color(75, 235, 255, alpha);
+            g2.setColor(barCol);
+            g2.fillRect(cx - off - 3, laneY - 9, 6, 18);
+            g2.fillRect(cx + off - 3, laneY - 9, 6, 18);
+        }
+
+        // Center beat bullseye reticle
+        int coreR = perfectWin ? 12 : 9;
+        g2.setColor(perfectWin ? (fever ? Theme.GOLD : new Color(75, 245, 255)) : new Color(210, 215, 225, 180));
+        Stroke old = g2.getStroke();
+        g2.setStroke(new BasicStroke(perfectWin ? 2.6f : 1.6f));
+        g2.drawOval(cx - coreR, laneY - coreR, coreR * 2, coreR * 2);
+        if (perfectWin) {
+            g2.setColor(new Color(255, 255, 255, 150));
+            g2.fillOval(cx - 4, laneY - 4, 8, 8);
+        }
+        g2.setStroke(old);
+
+        String prompt = fever ? "FEVER OVERDRIVE!  SPACE / CLICK" : "SHOOT ON BEAT  SPACE / CLICK";
+        int tw = Theme.pixelWidth(prompt, 2);
+        Theme.drawPixelTextShadow(g2, prompt, cx - tw / 2, y + 29, 2, perfectWin ? Theme.GOLD : Theme.TEXT_2);
     }
 
     /** Atmospheric Nightfall darkness with warm light pools around the player, campfire, and guard posts. */
@@ -1723,7 +2343,7 @@ public final class GamePanel extends JPanel
         }
         Graphics2D g = (Graphics2D) g2.create();
         int w = Theme.pixelWidth(hint, 2) + 40, h = 34;
-        int x = (getViewWidth() - w) / 2, y = getViewHeight() - h - 18;
+        int x = (getViewWidth() - w) / 2, y = getViewHeight() - h - 64;
         Theme.paintPanel(g, Theme.Panel.GLASS, x, y, w, h, 1);
         Theme.drawPixelTextShadow(g, hint, x + 20, y + 12, 2, Theme.GOLD);
         g.dispose();
@@ -1759,14 +2379,14 @@ public final class GamePanel extends JPanel
         g.setColor(SCRIM);
         g.fillRect(0, 0, w, h);
         String[][] controls = {
-            {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
+            {"Dodge / Strafe", "w", "a", "s", "d"}, {"Shoot on Beat", "space", "mouse_left"},
             {"Grenade", "mouse_right", "g"}, {"Medkit", "e"},
-            {"Switch weapon (1-7)", "mouse_mid"}, {"Base NPC", "b"},
+            {"Switch weapon (1-7)", "mouse_mid"}, {"Upgrade Shop", "b"},
             {"Resume", "p", "esc"}
         };
         BufferedImage title = Theme.kit("titles/paused", 2);
         int rowH = 40, rows = (controls.length + 1) / 2;
-        int cardW = 560, cardH = 34 + title.getHeight() + 44 + rows * rowH + 14;
+        int cardW = 630, cardH = 34 + title.getHeight() + 44 + rows * rowH + 14;
         int x0 = (w - cardW) / 2, y0 = (h - cardH) / 2;
         Theme.paintPanel(g, Theme.Panel.GLASS, x0, y0, cardW, cardH, 2);
         g.drawImage(title, x0 + 34, y0 + 30, null);
@@ -1796,7 +2416,7 @@ public final class GamePanel extends JPanel
         g2.fillRect(0, 0, w, h);
         BufferedImage title = Theme.kit(won ? "titles/survived" : "titles/you_died", 3);
         g2.drawImage(title, (w - title.getWidth()) / 2, h / 2 - title.getHeight() - 10, null);
-        String stats = "DAY " + wave + "   INFECTED KILLED " + kills + "   BASE LV " + getTotalBaseLevel() + "   TIME " + formatTime(getElapsedSeconds());
+        String stats = "LAP " + (lapsCompleted + 1) + "   KILLS " + kills + "   MAX COMBO " + maxCombo + "X   SCORE " + getScore() + "   TIME " + formatTime(getElapsedSeconds());
         Theme.drawPixelTextShadow(g2, stats, (w - Theme.pixelWidth(stats, 3)) / 2, h / 2 + 16, 3, Theme.TEXT);
     }
 }

@@ -83,6 +83,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private JRadioButton[] classRadios = new JRadioButton[GameData.PlayerClass.values().length];
     private final ButtonGroup classGroup = new ButtonGroup();
     private JTextArea classInfoArea;
+    private JComboBox<GameData.WeaponType> weaponCombo;
+    private JTextArea weaponInfoArea;
     private JComboBox<GameData.MapType> mapCombo;
     private JTextArea mapInfoArea;
     private JSlider difficultySlider;
@@ -110,7 +112,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private final transient Map<GameData.MapType, GameMap> mapCache = new EnumMap<>(GameData.MapType.class);
 
     public MainApplication() {
-        super("Last Camp Survivor");
+        super("Beat Camp Survivor");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
 
         JPanel root = new JPanel(new BorderLayout());
@@ -123,6 +125,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         // show the starting selection everywhere before the window appears
         showClassInfo();
+        showWeaponInfo();
         showMapInfo();
         showVolume();
         updateDifficultyReadout();
@@ -143,9 +146,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         JPanel title = Theme.transparentPanel(new GridLayout(0, 1, 0, 10));
         title.add(Theme.row(0, new Theme.PixelLabel("EGCO 213 - GROUP PROJECT 3", 2, Theme.GOLD)));
-        title.add(Theme.row(0, shadowed("LAST CAMP", 6, Theme.TEXT)));
+        title.add(Theme.row(0, shadowed("BEAT CAMP", 6, Theme.TEXT)));
         title.add(Theme.row(0, shadowed("SURVIVOR", 6, Theme.GOLD)));
-        title.add(Theme.row(0, new Theme.PixelLabel("SCAVENGE. BUILD CAMP. SURVIVE.", 2, Theme.TEXT_2)));
+        title.add(Theme.row(0, new Theme.PixelLabel("125 BPM RHYTHM AUTO-RUNNER.", 2, Theme.TEXT_2)));
         hero.add(title, BorderLayout.NORTH);
 
         JPanel crew = Theme.transparentPanel(new GridLayout(0, 1, 0, 4));
@@ -273,10 +276,20 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         mapCombo.addActionListener(this);
         mapInfoArea = Theme.textBlock("", 12, Theme.TEXT_2);
         mapInfoArea.setRows(2);
-        JTextArea gearArea = Theme.textBlock("Survival Knife (Melee) + Class Supplies.\n"
-                + "Scavenge parts outside to craft guns & fortify camp.", 12, Theme.TEXT_2);
+        weaponCombo = new JComboBox<>(GameData.START_WEAPONS);
+        Theme.styleCombo(weaponCombo, new Theme.ListRenderer<GameData.WeaponType>() {
+            private static final long serialVersionUID = 1L;
+
+            @Override
+            String textFor(GameData.WeaponType value) {
+                return value.displayName;
+            }
+        });
+        weaponCombo.addActionListener(this);
+        weaponInfoArea = Theme.textBlock("", 12, Theme.TEXT_2);
+        weaponInfoArea.setRows(2);
         JPanel loadout = Theme.transparentPanel(new GridLayout(1, 2, 14, 0));
-        loadout.add(fieldColumn("Starting Gear", Theme.label("Survival Knife Only", Font.BOLD, 13, Theme.GOLD), gearArea));
+        loadout.add(fieldColumn("Starting Weapon", weaponCombo, weaponInfoArea));
         loadout.add(fieldColumn("Region", mapCombo, mapInfoArea));
         form.add(loadout, 14);
 
@@ -355,18 +368,18 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         Form form = new Form(page);
 
         int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.DAY_CYCLE_SECONDS;
-        howToArea = Theme.textBlock("Survive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
-                + " Day and Night cycles! You start with a Survival Knife and an armed NPC Ally: scavenge Supply Chests during"
-                + " each " + GameData.DAYLIGHT_SECONDS + "s Daylight, recruit extra NPCs & fortify Safe Camp [B] before Nightfall.",
+        howToArea = Theme.textBlock("Survive " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
+                + " Day and Night cycles! Your runner sprints continuously along the map route at 125 BPM."
+                + " Shoot monsters ON THE BEAT to rack up Combos, Fever Overdrive, and explosive screen-shaking hits!",
                 13, Theme.PAPER_TEXT);
-        form.add(new Theme.PixelLabel("SURVIVAL GOAL", 2, Theme.DARK_RED), 0);
+        form.add(new Theme.PixelLabel("RHYTHM SURVIVAL GOAL", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 6);
 
         // each row: what it does, then the keys (sprites from the Hollow Creek UI kit)
         String[][] controls = {
-            {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
+            {"Dodge", "w", "a", "s", "d"}, {"Beat Shot", "space", "mouse_left"},
             {"Grenade", "mouse_right", "g"}, {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"},
-            {"Switch weapon (1-7)", "mouse_mid"}, {"Talk to Base NPCs", "b"},
+            {"Switch weapon (1-7)", "mouse_mid"}, {"Shop (Anytime)", "b"},
             {"Pause", "p", "esc"}, {"Craft / Build / Heal", "enter"}
         };
         JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 6));
@@ -377,10 +390,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 14);
         form.add(keys, 8);
 
-        form.add(new Theme.PixelLabel("DAYLIGHT, BASE NPC & NIGHTFALL", 2, Theme.DARK_RED), 14);
-        form.add(Theme.textBlock("Loot Scraps, Wood, Ammo, and Kits by day. Return inside Safe Camp (green minimap icon) and press B"
-                + " to talk to the Gunsmith, Doctor, and Engineer: craft your first Pistol and heavier guns (keys 1-7), upgrade stats,"
-                + " heal wounds, and build Guard Posts, Walls, Medical Tents, and Supply Depots to withstand Nightfall and Blood Moons.",
+        form.add(new Theme.PixelLabel("125 BPM BEAT COMBO, FEVER & LAPS", 2, Theme.DARK_RED), 14);
+        form.add(Theme.textBlock("Watch the bottom Beat Bar & monster rings: press SPACE or CLICK on the beat for"
+                + " PERFECT / GREAT bonus score and Fever charge. Fill Fever 100% for Fever Overdrive (infinite ammo, 2x damage,"
+                + " golden trails). Complete full map laps for HP, Ammo & Scraps, or press B anytime to upgrade.",
                 13, Theme.PAPER_TEXT), 6);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);
@@ -484,6 +497,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         } else if (source == mapCombo) {
             showMapInfo();
             AssetLoader.playSound("click");
+        } else if (source == weaponCombo) {
+            showWeaponInfo();
+            AssetLoader.playSound("click");
         } else if (source == soundBox) {
             AssetLoader.setSoundEnabled(soundBox.isSelected());
             AssetLoader.playSound("click");   // only audible when it was just switched on
@@ -533,8 +549,21 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return item instanceof GameData.MapType ? (GameData.MapType) item : GameData.MapType.WASTELAND_HIGHWAY;
     }
 
+    private GameData.WeaponType getSelectedWeapon() {
+        Object item = weaponCombo == null ? null : weaponCombo.getSelectedItem();
+        return item instanceof GameData.WeaponType ? (GameData.WeaponType) item : GameData.WeaponType.PISTOL;
+    }
+
     private void showClassInfo() {
         classInfoArea.setText(getSelectedClass().description);
+        refreshHero();
+    }
+
+    private void showWeaponInfo() {
+        GameData.WeaponType w = getSelectedWeapon();
+        String dmg = w.pellets > 1 ? (w.damage + "x" + w.pellets) : String.valueOf(w.damage);
+        String ammo = w.melee ? "Melee Swing" : (w.ammoCost == 0 ? "Free Ammo" : (w.ammoCost + " Ammo/shot"));
+        weaponInfoArea.setText("DMG " + dmg + "  |  " + ammo + "\nRange " + w.range + " px  |  Pierce " + w.pierce);
         refreshHero();
     }
 
@@ -555,7 +584,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
     private void refreshHero() {
         if (heroPanel != null && mapCombo != null) {
-            heroPanel.setScene(getMap(getSelectedMap()), getSelectedClass(), GameData.WeaponType.KNIFE);
+            heroPanel.setScene(getMap(getSelectedMap()), getSelectedClass(), getSelectedWeapon());
         }
     }
 
@@ -612,7 +641,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         GameData.GameSettings s = new GameData.GameSettings();
         s.playerName = playerName;
         s.playerClass = getSelectedClass();
-        s.startWeapon = GameData.WeaponType.KNIFE;
+        s.startWeapon = getSelectedWeapon();
         s.map = getSelectedMap();
         s.difficulty = difficultySlider.getValue();
         s.volume = volumeSlider.getValue();

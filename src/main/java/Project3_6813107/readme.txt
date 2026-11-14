@@ -1,4 +1,4 @@
-Last Camp Survivor - EGCO 213 Group Project 3
+Beat Camp Survivor - EGCO 213 Group Project 3
 =============================================
 
 Group members (name - student ID)
@@ -9,12 +9,12 @@ Natthanon Achachan          6813241
 
 What the game is
 ----------------
-A 2D top-down zombie survival game written with Java Swing (javax.swing, java.awt,
-javax.sound.sampled, javax.imageio only). Walk with W A S D, aim with the mouse, scavenge
-outside the camp to hunt roaming zombies and open Supply Chests, then return to Base Camp
-(press B) to talk to camp NPCs: craft weapons, upgrade stats, heal wounds, and build Guard
-Posts, Fortified Walls, a Medical Tent, and a Supply Depot before periodic Horde Raids hit.
-Survive 5 minutes to win.
+A 2D rhythm auto-runner zombie shooter written with Java Swing (javax.swing, java.awt,
+javax.sound.sampled, javax.imageio only). Your character automatically sprints along
+a loop route through the map at 125 BPM (dodge/strafe with W A S D), aiming with the
+mouse and firing ON THE BEAT (Left Click or Space) for PERFECT/GREAT combos, Fever
+Overdrive, neon shockwaves, spark showers, zoom kick, and heavy screen shake.
+Press B anytime to open the Workshop Shop. Complete laps for resupplies and survive 5 minutes.
 
 How to run
 ----------

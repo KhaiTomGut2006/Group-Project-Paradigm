@@ -84,7 +84,11 @@ public final class Player extends Entity {
         inventory.put(GameData.ItemType.GRENADE, playerClass.startGrenades);
         inventory.put(GameData.ItemType.SCRAPS, 2 + playerClass.startScraps);
         ownedWeapons.add(GameData.WeaponType.KNIFE);
-        currentWeapon = GameData.WeaponType.KNIFE;
+        ownedWeapons.add(GameData.WeaponType.PISTOL);
+        GameData.WeaponType chosen = this.settings.startWeapon != null
+                ? this.settings.startWeapon : GameData.WeaponType.PISTOL;
+        ownedWeapons.add(chosen);
+        currentWeapon = chosen;
         maxHp = GameData.PLAYER_BASE_HP + playerClass.bonusMaxHp;
         hp = maxHp;
         aimX = startX + 50;
@@ -137,6 +141,20 @@ public final class Player extends Entity {
             moveWithCollision(dx / len * s, dy / len * s);
         }
         facingLeft = aimX < x;
+    }
+
+    /**
+     * Advances the player along an auto-runner step vector and keeps walk animation active even
+     * when no manual WASD key is held.
+     */
+    public synchronized void moveAutoRun(double dx, double dy) {
+        if (!alive) {
+            return;
+        }
+        if (Math.hypot(dx, dy) > 0.01) {
+            moving = true;
+            moveWithCollision(dx, dy);
+        }
     }
 
     private void updatePoison() {
@@ -204,6 +222,61 @@ public final class Player extends Entity {
         }
         swingAngle = angle;
         fireCooldown = getCooldownTicks(w);
+        AssetLoader.playSound(w.shootSound);
+        return out;
+    }
+
+    /**
+     * Rhythm-mode fire: scales weapon damage and projectile boost by beat judgment, grants free
+     * ammo during Fever Overdrive, and caps gun cooldowns so slow weapons can still fire on beat.
+     */
+    public synchronized List<Bullet> shootRhythm(double targetX, double targetY, GameData.RhythmJudge judge, boolean feverActive) {
+        List<Bullet> out = new ArrayList<>();
+        if (!alive || fireCooldown > 0) {
+            return out;
+        }
+        GameData.WeaponType w = currentWeapon;
+        if (!feverActive && w.ammoCost > inventory.get(GameData.ItemType.AMMO)) {
+            fallBackFromEmptyWeapon();
+            return out;
+        }
+        double hx = getHandX(), hy = getHandY();
+        double angle = Math.atan2(targetY - hy, targetX - hx);
+        double mult = judge.damageMult * (feverActive ? 1.35 : 1.0);
+        int dmg = Math.max(1, (int) Math.round(getWeaponDamage(w) * mult));
+        int tier = feverActive ? 3 : (judge == GameData.RhythmJudge.PERFECT || judge == GameData.RhythmJudge.GREAT ? 2 : 1);
+        int extraPierce = (judge == GameData.RhythmJudge.PERFECT ? 1 : 0) + (feverActive ? 1 : 0);
+        double speedMult = judge == GameData.RhythmJudge.PERFECT ? (feverActive ? 1.35 : 1.2)
+                : (judge == GameData.RhythmJudge.GREAT ? 1.1 : 1.0);
+        if (w.melee) {
+            Bullet slash = Bullet.melee(this, angle, w, dmg);
+            slash.applyRhythmBoost(tier, extraPierce, 1.0);
+            out.add(slash);
+            swingTick = SWING_TICKS;
+            swingAngle = angle;
+        } else {
+            double mx = hx + Math.cos(angle) * 14, my = hy + Math.sin(angle) * 14;
+            for (int i = 0; i < w.pellets; i++) {
+                double spread = Math.toRadians(w.spreadDeg);
+                double offset;
+                if (w.pellets > 1) {
+                    offset = -spread / 2 + spread * i / (w.pellets - 1) + (random.nextDouble() - 0.5) * spread * 0.15;
+                } else {
+                    offset = (random.nextDouble() - 0.5) * spread;
+                }
+                Bullet b = Bullet.shot(mx, my, angle + offset, w, dmg);
+                b.setMap(map);
+                b.applyRhythmBoost(tier, extraPierce, speedMult);
+                out.add(b);
+            }
+            if (!feverActive) {
+                inventory.put(GameData.ItemType.AMMO, Math.max(0, inventory.get(GameData.ItemType.AMMO) - w.ammoCost));
+            }
+            shootAnimTick = 0;
+        }
+        swingAngle = angle;
+        fireCooldown = (judge == GameData.RhythmJudge.OFF_BEAT)
+                ? getCooldownTicks(w) : Math.min(getCooldownTicks(w), 14);
         AssetLoader.playSound(w.shootSound);
         return out;
     }
@@ -502,6 +575,12 @@ public final class Player extends Entity {
         return inventory.get(GameData.ItemType.AMMO);
     }
 
+    public synchronized void addInventory(GameData.ItemType type, int amount) {
+        if (type != null && amount != 0) {
+            inventory.put(type, Math.max(0, inventory.get(type) + amount));
+        }
+    }
+
     public double getMoveSpeed() {
         return speed * playerClass.speedMult * (1.0 + GameData.RecipeKind.SPEED.perLevel * levels.get(GameData.RecipeKind.SPEED));
     }
@@ -579,11 +658,11 @@ public final class Player extends Entity {
         return getHandY() + Math.sin(getAimAngle()) * 14;
     }
 
-    private double getHandX() {
+    public double getHandX() {
         return x + (facingLeft ? -2 : 2);
     }
 
-    private double getHandY() {
+    public double getHandY() {
         return y + 2;
     }
 

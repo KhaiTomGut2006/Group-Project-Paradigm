@@ -128,15 +128,15 @@ public final class GameFrame extends JFrame implements ActionListener {
         JPanel left = Theme.row(8, heartIcon, column(stack(hpBar), hpValueLabel),
                 column(armorSegments, Theme.caption("Armor")), Theme.row(2, poisonedIcon, injuredIcon, bleedingIcon));
 
-        waveLabel = new Theme.PixelLabel("DAY 1: DAYLIGHT - SAFE CAMP", 2, Theme.TEXT_2);
+        waveLabel = new Theme.PixelLabel("125 BPM RUN - LAP 1", 2, Theme.TEXT_2);
         timerLabel = new Theme.PixelLabel("5:00", 4, Theme.TEXT);
         timerLabel.setShadow(true);
         waveBar = Theme.bar(Theme.Fill.STAMINA, 170, 1);
         JPanel middle = Theme.transparentPanel(new GridBagLayout());
         middle.add(column(centred(waveLabel), centred(timerLabel), centred(waveBar)));
 
-        scoreValueLabel = new Theme.PixelLabel("1 NPC", 2, Theme.GOLD);
-        scoreValueLabel.setToolTipText("Active NPC allies & camp guards (recruit more at Base Camp [B])");
+        scoreValueLabel = new Theme.PixelLabel("0 - 1X", 2, Theme.GOLD);
+        scoreValueLabel.setToolTipText("Total Rhythm Score and Combo Multiplier (press B anytime for Shop)");
         killsValueLabel = new Theme.PixelLabel("0", 3, Theme.TEXT);
         autoFireBox = new JCheckBox("Auto-fire", settings.autoFire);
         Theme.styleCheckBox(autoFireBox);
@@ -144,7 +144,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         autoFireBox.addActionListener(this);
         pauseButton = makeButton("Pause", Theme.ButtonStyle.GREY, "p");
         quitButton = makeButton("Quit", Theme.ButtonStyle.GREY, null);
-        JPanel right = Theme.row(10, column(Theme.caption("Allies"), scoreValueLabel),
+        JPanel right = Theme.row(10, column(Theme.caption("Score"), scoreValueLabel),
                 column(Theme.caption("Kills"), killsValueLabel), autoFireBox, Theme.row(4, pauseButton, quitButton));
 
         return makePlate(left, middle, right);
@@ -257,7 +257,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         injuredIcon.setVisible(p.isAlive() && hpPercent < 30);
         bleedingIcon.setVisible(p.isHurt());
         refreshWaveAndTime();
-        scoreValueLabel.setText(gamePanel.getAllyCount() + " NPC");
+        scoreValueLabel.setText(gamePanel.getScore() + " - " + gamePanel.getComboMultiplier() + "X");
         killsValueLabel.setText(String.valueOf(gamePanel.getKills()));
         pauseButton.setText(gamePanel.isPaused() ? "RESUME" : "PAUSE");
         hotbar.update(p);
@@ -266,16 +266,16 @@ public final class GameFrame extends JFrame implements ActionListener {
     }
 
     private void refreshWaveAndTime() {
-        int day = gamePanel.getDay();
         int elapsed = gamePanel.getElapsedSeconds();
         int left = Math.max(0, gamePanel.getTimeLimitSeconds() - elapsed);
-        int phaseLeft = Math.max(0, gamePanel.getPhaseSecondsRemaining());
-        String status = gamePanel.isNight()
-                ? "DAY " + day + " NIGHT - DAWN " + formatTime(phaseLeft)
-                : "DAY " + day + " DAY - NIGHT " + formatTime(phaseLeft);
+        int lap = gamePanel.getLapsCompleted() + 1;
+        boolean fever = gamePanel.isFeverActive();
+        String status = fever
+                ? ("125 BPM FEVER!  LAP " + lap)
+                : ("125 BPM RUN - LAP " + lap + "  DAY " + gamePanel.getDay());
         waveLabel.setText(status);
-        waveLabel.setColor(gamePanel.isNight() ? Theme.RED : (gamePanel.isPlayerInBase() ? new Color(0x88D470) : Theme.GOLD));
-        waveBar.setValue(gamePanel.getDayCycleProgressPercent());
+        waveLabel.setColor(fever ? Theme.GOLD : (gamePanel.isNight() ? Theme.RED : new Color(0x88D470)));
+        waveBar.setValue(fever ? gamePanel.getFeverPercent() : gamePanel.getDayCycleProgressPercent());
         timerLabel.setText(formatTime(left));
         timerLabel.setColor(left <= 30 ? Theme.GOLD : Theme.TEXT);
     }
@@ -393,12 +393,7 @@ public final class GameFrame extends JFrame implements ActionListener {
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
         if (source == workshopButton) {
-            if (!gamePanel.isPlayerInBase()) {
-                gamePanel.getPlayer().showHint("Return to Base Camp (green icon) to talk to NPCs!");
-                AssetLoader.playSound("click");
-            } else {
-                openUpgradeDialog();
-            }
+            openUpgradeDialog();
         } else if (source == pauseButton) {
             if (gamePanel.isPaused()) {
                 gamePanel.resumeGame();
