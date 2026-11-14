@@ -48,10 +48,13 @@ public final class Monster extends Entity {
     private double nudgeAngle;
     private int nudgeTicks;
     private int strafeSign;
-    private Bullet pendingShot;
+    private final List<Bullet> pendingShots = new ArrayList<>();
     private int aimWarning;          // ticks of the "!" warning before a bandit fires
     private boolean raiding;         // true = marching on base during Raid; false = outer-zone scavenger
     private boolean provoked;        // true once hit by player or guard
+    private int slowTicks;
+    private int lungeTicks;
+    private double damageScale = 1.0;
     private double wanderAngle;
     private int wanderTimer;
 
@@ -82,6 +85,12 @@ public final class Monster extends Entity {
         }
     }
 
+    /** Scales movement speed and attack damage according to chamber depth and difficulty. */
+    public void applyChamberScaling(double speedScale, double dmgScale) {
+        this.speed = type.speed * Math.max(0.4, speedScale);
+        this.damageScale = Math.max(0.25, dmgScale);
+    }
+
     public GameData.MonsterType getType() {
         return type;
     }
@@ -106,6 +115,8 @@ public final class Monster extends Entity {
         if (rangedCooldown > 0) rangedCooldown--;
         if (hitFlash > 0) hitFlash--;
         if (hitAnim > 0) hitAnim--;
+        if (slowTicks > 0) slowTicks--;
+        if (lungeTicks > 0) lungeTicks--;
 
         // knockback slides the body back, then fades out
         if (Math.abs(pushX) + Math.abs(pushY) > 0.05) {
@@ -127,13 +138,14 @@ public final class Monster extends Entity {
         updateRangedAttack(dist);
     }
 
-    /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside the base. */
+    /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside Safe Camp. */
     private void moveTowardsTarget(double dist) {
-        boolean playerInCamp = map != null && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
-        if (!raiding && dist > 230.0) {
+        boolean playerInCamp = map != null && map.hasSafeCamp() && target != null
+                && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+        if (!raiding && dist > 260.0) {
             provoked = false;
         }
-        double aggroRange = provoked ? 225.0 : 130.0;
+        double aggroRange = (map != null && !map.hasSafeCamp()) ? 9999.0 : (provoked ? 225.0 : 130.0);
         if (!raiding && (playerInCamp || dist > aggroRange)) {
             wanderOuterZone();
             return;
@@ -143,13 +155,18 @@ public final class Monster extends Entity {
             chaseAngle = map == null ? angleTo(target) : map.getChaseAngle(x, getFeetY() - 4, target.getX(), target.getFeetY() - 4, width);
         }
         double moveAngle = chaseAngle;
-        double moveSpeed = speed;
+        if (type == GameData.MonsterType.ZOMBIE_RUNNER && lungeTicks == 0
+                && dist < 165.0 && dist > 28.0 && ((animTimer + (int) Math.abs(x)) % 58 == 0)) {
+            lungeTicks = 24;
+        }
+        double enrageMult = (hp * 100 < maxHp * 50) ? 1.28 : 1.0;
+        double moveSpeed = (slowTicks > 0 ? speed * 0.65 : speed) * (lungeTicks > 0 ? 1.65 : 1.0) * enrageMult;
         if (type.preferredDistance > 0) {
             if (dist < type.preferredDistance * 0.75) {
                 moveAngle = angleTo(target) + Math.PI;              // too close: back off
             } else if (dist < type.preferredDistance * 1.15) {
                 moveAngle = angleTo(target) + strafeSign * Math.PI / 2;   // in range: circle
-                moveSpeed = speed * 0.6;
+                moveSpeed *= 0.6;
             }
         } else if (dist < 6) {
             return;   // already hugging the player
@@ -203,7 +220,8 @@ public final class Monster extends Entity {
         if (type.rangedProjectile == null) {
             return;
         }
-        boolean playerInCamp = map != null && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+        boolean playerInCamp = map != null && map.hasSafeCamp() && target != null
+                && map.getCampArea().contains((int) target.getX(), (int) target.getY());
         if (!raiding && playerInCamp) {
             aimWarning = 0;
             return;
@@ -212,18 +230,42 @@ public final class Monster extends Entity {
             aimWarning--;
             if (aimWarning == 0) {
                 double a = angleTo(target);
-                pendingShot = Bullet.enemyShot(x + Math.cos(a) * 8, y + Math.sin(a) * 8, a,
-                        type.rangedProjectile, type.damage, type.rangedRange + 60);
-                pendingShot.setMap(map);
-                rangedCooldown = GameData.msToTicks(type.rangedCooldownMs);
-                AssetLoader.playSound(type.rangedProjectile == GameData.Projectile.TOXIC_SPIT ? "toxic_spit" : "enemy_shoot");
+                if (type == GameData.MonsterType.ZOMBIE_BOSS) {
+                    int dmg = Math.max(6, (int) Math.round((type.damage / 2.0) * damageScale));
+                    queueEnemyVolley(a, 7, 0.24, dmg, 10, "boss_roar");
+                    lungeTicks = 38;
+                } else if (type == GameData.MonsterType.ZOMBIE_TOXIC) {
+                    int dmg = Math.max(6, (int) Math.round((type.damage * 0.75) * damageScale));
+                    queueEnemyVolley(a, 3, 0.20, dmg, 8, "toxic_spit");
+                } else if (type == GameData.MonsterType.BANDIT_SHOOTER) {
+                    int dmg = Math.max(7, (int) Math.round((type.damage * 0.80) * damageScale));
+                    queueEnemyVolley(a, 2, 0.14, dmg, 8, "enemy_shoot");
+                } else {
+                    String sfx = type.rangedProjectile == GameData.Projectile.TOXIC_SPIT ? "toxic_spit" : "enemy_shoot";
+                    int dmg = Math.max(5, (int) Math.round(type.damage * damageScale));
+                    queueEnemyVolley(a, 1, 0.0, dmg, 8, sfx);
+                }
             }
             return;
         }
         boolean inSight = map == null || map.hasClearPath(x, y, target.getX(), target.getY());
         if (rangedCooldown == 0 && dist <= type.rangedRange && inSight) {
-            aimWarning = type == GameData.MonsterType.BANDIT_SHOOTER ? 24 : 1;
+            aimWarning = type == GameData.MonsterType.BANDIT_SHOOTER ? 7 : 1;
         }
+    }
+
+    private void queueEnemyVolley(double centerAngle, int count, double stepRad,
+            int damage, double spawnOffset, String sound) {
+        double start = -0.5 * (count - 1);
+        for (int i = 0; i < count; i++) {
+            double ang = centerAngle + (start + i) * stepRad;
+            Bullet b = Bullet.enemyShot(x + Math.cos(ang) * spawnOffset, y + Math.sin(ang) * spawnOffset,
+                    ang, type.rangedProjectile, damage, type.rangedRange + 60);
+            b.setMap(map);
+            pendingShots.add(b);
+        }
+        rangedCooldown = GameData.msToTicks(type.rangedCooldownMs);
+        AssetLoader.playSound(sound);
     }
 
     /** Bites the player if touching and the bite cooldown is over. Returns the damage to apply (0 = none). */
@@ -237,14 +279,12 @@ public final class Monster extends Entity {
             return 0;
         }
         attackCooldown = GameData.msToTicks(type.attackCooldownMs);
-        return type.damage;
+        return Math.max(1, (int) Math.round(type.damage * damageScale));
     }
 
-    /** The projectile fired this tick (once), or null. */
+    /** One queued projectile fired by this monster, or null when empty. */
     public Bullet takeProjectile() {
-        Bullet b = pendingShot;
-        pendingShot = null;
-        return b;
+        return pendingShots.isEmpty() ? null : pendingShots.remove(0);
     }
 
     /** True while the bandit is about to shoot (GamePanel may show the "!" bubble / play a sound). */
@@ -253,7 +293,7 @@ public final class Monster extends Entity {
     }
 
     /**
-     * Applies a hit: damage, a white flash, the hit animation and a push in direction pushAngle.
+     * Applies a hit: damage, a white flash, minimal stagger (no stunlock) and push.
      * Returns true if this hit killed the monster.
      */
     public boolean takeHit(int damage, double pushAngle, double pushPixels) {
@@ -263,34 +303,44 @@ public final class Monster extends Entity {
         provoked = true;
         takeDamage(damage);
         hitFlash = HIT_FLASH_TICKS;
-        double resist = type == GameData.MonsterType.ZOMBIE_BOSS ? 0.25 : 1.0;
-        pushX += Math.cos(pushAngle) * pushPixels * 0.35 * resist;
-        pushY += Math.sin(pushAngle) * pushPixels * 0.35 * resist;
+        double resist = (type == GameData.MonsterType.ZOMBIE_BOSS || type == GameData.MonsterType.ZOMBIE_RUNNER) ? 0.10 : 0.20;
+        pushX += Math.cos(pushAngle) * pushPixels * resist;
+        pushY += Math.sin(pushAngle) * pushPixels * resist;
         if (alive) {
-            if (type != GameData.MonsterType.ZOMBIE_BOSS) {
-                hitAnim = 8;
+            if (type != GameData.MonsterType.ZOMBIE_BOSS && type != GameData.MonsterType.ZOMBIE_RUNNER) {
+                hitAnim = 2;
             }
-            aimWarning = 0;   // getting shot interrupts aiming
             AssetLoader.playSound("hit");
         } else {
             deathTick = 0;
-            pendingShot = null;
+            pendingShots.clear();
             AssetLoader.playSound(type == GameData.MonsterType.ZOMBIE_BOSS ? "boss_roar" : "monster_death");
         }
         return !alive;
     }
 
-    /** Loot for this monster. lootBonusPercent comes from the player's class. */
+    public void applySlow(int ticks) {
+        slowTicks = Math.max(slowTicks, ticks);
+    }
+
+    /** Scarce roguelike loot roll: multiplicative luck scaling and max 1 drop per non-boss kill. */
     public List<DroppedItem> rollDrops(Random rng, int lootBonusPercent) {
         List<DroppedItem> list = new ArrayList<>();
-        for (GameData.Drop d : type.getDrops()) {
-            int chance = d.chancePercent >= 100 ? 100 : d.chancePercent + lootBonusPercent;
+        GameData.Drop[] pool = type.getDrops();
+        int start = pool.length > 0 ? rng.nextInt(pool.length) : 0;
+        for (int offset = 0; offset < pool.length; offset++) {
+            GameData.Drop d = pool[(start + offset) % pool.length];
+            int chance = d.chancePercent >= 100 ? 100
+                    : Math.min(85, (int) Math.round(d.chancePercent * (1.0 + lootBonusPercent / 100.0)));
             if (rng.nextInt(100) < chance) {
                 int amount = d.min + (d.max > d.min ? rng.nextInt(d.max - d.min + 1) : 0);
                 DroppedItem item = new DroppedItem(d.item, amount, x, getFeetY() - 6, target);
                 item.setMap(map);
                 item.scatter(rng);
                 list.add(item);
+                if (type != GameData.MonsterType.ZOMBIE_BOSS) {
+                    break;
+                }
             }
         }
         return list;

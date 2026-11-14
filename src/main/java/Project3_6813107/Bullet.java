@@ -77,20 +77,26 @@ public final class Bullet extends Entity {
         this.maxLife = maxLife;
         this.targetX = targetX;
         this.targetY = targetY;
-        this.knockback = Math.min(7, 1 + damage / 10);
+        this.knockback = owner != null ? 1 : Math.min(6, 1 + damage / 12);
     }
 
     // ------------------------------------------------------------------ factories
     /** A bullet/rocket fired by the player with weapon w (damage already includes upgrades). */
     public static Bullet shot(double x, double y, double angle, GameData.WeaponType w, int damage) {
-        return new Bullet(w.projectile(), x, y, angle, w.bulletSpeed, damage, w.range, false,
-                w.explosive, w.blastRadius, w.pierce, null, 0, 0, 0, 0);
+        return shot(x, y, angle, w, damage, 1.0, 0);
+    }
+
+    /** A bullet/rocket fired by the player with run-perk speed multiplier and bonus pierce. */
+    public static Bullet shot(double x, double y, double angle, GameData.WeaponType w, int damage,
+                              double speedMult, int bonusPierce) {
+        return new Bullet(w.projectile(), x, y, angle, w.bulletSpeed * speedMult, damage, w.range, false,
+                w.explosive, w.blastRadius, w.pierce + bonusPierce, null, 0, 0, 0, 0);
     }
 
     /** The invisible hitbox of a knife/axe swing in front of the owner. */
     public static Bullet melee(Entity owner, double angle, GameData.WeaponType w, int damage) {
         return new Bullet(GameData.Projectile.SLASH, owner.getX(), owner.getY(), angle, 0, damage, w.range, false,
-                false, 0, 99, owner, Math.toRadians(w.spreadDeg), 9, 0, 0);
+                false, 0, 99, owner, Math.toRadians(w.spreadDeg), 6, 0, 0);
     }
 
     /** A thrown grenade that lands on (targetX, targetY) - at most 200 px away - and explodes. */
@@ -98,14 +104,14 @@ public final class Bullet extends Entity {
         double dist = Math.min(200, Math.hypot(targetX - x, targetY - y));
         double a = Math.atan2(targetY - y, targetX - x);
         double tx = x + Math.cos(a) * dist, ty = y + Math.sin(a) * dist;
-        int flight = Math.max(20, (int) (dist / 4.0));
+        int flight = Math.max(12, (int) (dist / 6.5));
         return new Bullet(GameData.Projectile.GRENADE, x, y, a, dist / flight, GameData.GRENADE_DAMAGE, dist, false,
                 true, GameData.GRENADE_BLAST_RADIUS, 0, null, 0, flight, tx, ty);
     }
 
     /** A projectile fired by a monster (bandit bullet, toxic spit). */
     public static Bullet enemyShot(double x, double y, double angle, GameData.Projectile kind, int damage, double range) {
-        double speed = kind == GameData.Projectile.TOXIC_SPIT ? 2.6 : 3.6;
+        double speed = kind == GameData.Projectile.TOXIC_SPIT ? 5.4 : 6.8;
         return new Bullet(kind, x, y, angle, speed, damage, range, true, false, 0, 0, null, 0, 0, 0, 0);
     }
 

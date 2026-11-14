@@ -103,6 +103,11 @@ public abstract class Entity implements GameMap.Drawable {
         this.map = map;
     }
 
+    public void setPosition(double x, double y) {
+        this.x = x;
+        this.y = y;
+    }
+
     public double distanceTo(Entity other) {
         return Math.hypot(other.x - x, other.y - y);
     }

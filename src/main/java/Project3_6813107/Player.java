@@ -41,8 +41,12 @@ public final class Player extends Entity {
     private final EnumMap<GameData.ItemType, Integer> inventory = new EnumMap<>(GameData.ItemType.class);
     private final EnumSet<GameData.WeaponType> ownedWeapons = EnumSet.noneOf(GameData.WeaponType.class);
     private final EnumMap<GameData.RecipeKind, Integer> levels = new EnumMap<>(GameData.RecipeKind.class);
+    private final EnumMap<GameData.TacticalPerk, Integer> runPerks = new EnumMap<>(GameData.TacticalPerk.class);
     private final Random random = new Random(213);
     private GameData.WeaponType currentWeapon;
+    private GameData.WeaponType equippedPrimaryGun;
+    private GameData.WeaponType tempChamberWeapon;
+    private int deathDefianceLeft;
 
     // input
     private boolean up, down, left, right;
@@ -52,6 +56,9 @@ public final class Player extends Entity {
     // timers (in ticks)
     private int fireCooldown;
     private int grenadeCooldown;
+    private int dashTick;
+    private int dashCooldown;
+    private double dashDx, dashDy;
     private int shootAnimTick = -1;   // -1 = not playing the shoot strip
     private int swingTick;            // > 0 while a melee swing is shown
     private double swingAngle;
@@ -59,6 +66,7 @@ public final class Player extends Entity {
     private int hurtTick;
     private int invulnerableTick;
     private int poisonTick;
+    private int trapSlowTicks;
     private int deathTick;
     private String hint;
     private int hintTick;
@@ -79,8 +87,11 @@ public final class Player extends Entity {
         for (GameData.RecipeKind k : GameData.RecipeKind.values()) {
             levels.put(k, 0);
         }
+        for (GameData.TacticalPerk p : GameData.TacticalPerk.values()) {
+            runPerks.put(p, 0);
+        }
         inventory.put(GameData.ItemType.AMMO, GameData.PLAYER_START_AMMO + playerClass.bonusAmmo);
-        inventory.put(GameData.ItemType.MEDKIT, playerClass.startMedkits);
+        inventory.put(GameData.ItemType.MEDKIT, 0);
         inventory.put(GameData.ItemType.GRENADE, playerClass.startGrenades);
         inventory.put(GameData.ItemType.SCRAPS, 2 + playerClass.startScraps);
         ownedWeapons.add(GameData.WeaponType.KNIFE);
@@ -112,10 +123,12 @@ public final class Player extends Entity {
         animTimer++;
         if (fireCooldown > 0) fireCooldown--;
         if (grenadeCooldown > 0) grenadeCooldown--;
+        if (dashCooldown > 0) dashCooldown--;
         if (swingTick > 0) swingTick--;
         if (flickerTick > 0) flickerTick--;
         if (hurtTick > 0) hurtTick--;
         if (invulnerableTick > 0) invulnerableTick--;
+        if (trapSlowTicks > 0) trapSlowTicks--;
         if (hintTick > 0 && --hintTick == 0) hint = null;
         if (shootAnimTick >= 0) {
             shootAnimTick++;
@@ -128,15 +141,50 @@ public final class Player extends Entity {
             return;
         }
         updatePoison();
-        int dx = (right ? 1 : 0) - (left ? 1 : 0);
-        int dy = (down ? 1 : 0) - (up ? 1 : 0);
-        moving = dx != 0 || dy != 0;
-        if (moving) {
-            double len = Math.hypot(dx, dy);
-            double s = getMoveSpeed();
-            moveWithCollision(dx / len * s, dy / len * s);
+        if (dashTick > 0) {
+            dashTick--;
+            moving = true;
+            moveWithCollision(dashDx, dashDy);
+        } else {
+            int dx = (right ? 1 : 0) - (left ? 1 : 0);
+            int dy = (down ? 1 : 0) - (up ? 1 : 0);
+            moving = dx != 0 || dy != 0;
+            if (moving) {
+                double len = Math.hypot(dx, dy);
+                double s = getMoveSpeed();
+                moveWithCollision(dx / len * s, dy / len * s);
+            }
         }
         facingLeft = aimX < x;
+    }
+
+    /** Triggers a brief invulnerable dash (Space/Shift). Returns false while on cooldown. */
+    public synchronized boolean triggerDash() {
+        if (!alive || dashTick > 0 || dashCooldown > 0) {
+            return false;
+        }
+        int dx = (right ? 1 : 0) - (left ? 1 : 0);
+        int dy = (down ? 1 : 0) - (up ? 1 : 0);
+        double angle = (dx != 0 || dy != 0) ? Math.atan2(dy, dx) : getAimAngle();
+        int perkLv = getPerkLevel(GameData.TacticalPerk.ADRENALINE_DASH);
+        double dashSpeed = getMoveSpeed() * (3.45 + 0.35 * perkLv);
+        dashDx = Math.cos(angle) * dashSpeed;
+        dashDy = Math.sin(angle) * dashSpeed;
+        dashTick = 8;
+        fireCooldown = Math.min(fireCooldown, 2);
+        trapSlowTicks = 0;
+        invulnerableTick = Math.max(invulnerableTick, 12 + perkLv * 2);
+        dashCooldown = Math.max(14, (int) Math.round(32 * Math.max(0.40, 1.0 - 0.18 * perkLv)));
+        AssetLoader.playSound("swing");
+        return true;
+    }
+
+    public boolean isDashing() {
+        return dashTick > 0;
+    }
+
+    public double getDashReadyFraction() {
+        return dashCooldown <= 0 ? 1.0 : Math.max(0.0, 1.0 - dashCooldown / 32.0);
     }
 
     private void updatePoison() {
@@ -147,8 +195,10 @@ public final class Player extends Entity {
         if (poisonTick % GameData.msToTicks(GameData.POISON_PULSE_MS) == 0) {
             hp -= GameData.POISON_TICK_DAMAGE;
             if (hp <= 0) {
-                hp = 0;
-                die();
+                if (!tryDeathDefiance()) {
+                    hp = 0;
+                    die();
+                }
             }
         }
     }
@@ -186,6 +236,8 @@ public final class Player extends Entity {
             swingAngle = angle;
         } else {
             double mx = hx + Math.cos(angle) * 14, my = hy + Math.sin(angle) * 14;
+            int pierceLv = getPerkLevel(GameData.TacticalPerk.RICOCHET_PIERCE);
+            double speedMult = 1.0 + 0.15 * pierceLv;
             for (int i = 0; i < w.pellets; i++) {
                 double spread = Math.toRadians(w.spreadDeg);
                 double offset;
@@ -195,7 +247,7 @@ public final class Player extends Entity {
                 } else {
                     offset = (random.nextDouble() - 0.5) * spread;
                 }
-                Bullet b = Bullet.shot(mx, my, angle + offset, w, dmg);
+                Bullet b = Bullet.shot(mx, my, angle + offset, w, dmg, speedMult, pierceLv);
                 b.setMap(map);
                 out.add(b);
             }
@@ -209,11 +261,9 @@ public final class Player extends Entity {
     }
 
     private void fallBackFromEmptyWeapon() {
-        GameData.WeaponType fallback = ownedWeapons.contains(GameData.WeaponType.PISTOL)
-                ? GameData.WeaponType.PISTOL : GameData.WeaponType.KNIFE;
-        currentWeapon = fallback;
+        currentWeapon = GameData.WeaponType.KNIFE;
         flickerTick = FLICKER_TICKS;
-        showHint("Out of ammo - switched to " + fallback.displayName);
+        showHint("Out of ammo - switched to Survival Knife");
     }
 
     /** Throws a grenade (right click / G). Returns null if there is none or it is too soon. */
@@ -234,20 +284,10 @@ public final class Player extends Entity {
         return b;
     }
 
-    /** Uses one medkit (E). Returns false if none or already at full health. */
+    /** Manual self-healing via medkit is disabled in Roguelite mode; heal on chamber clear or at Field NPC. */
     public synchronized boolean useMedkit() {
-        if (!alive || hp >= maxHp) {
-            return false;
-        }
-        if (inventory.get(GameData.ItemType.MEDKIT) <= 0) {
-            showHint("No medkits - craft one in the workshop (B)");
-            return false;
-        }
-        inventory.put(GameData.ItemType.MEDKIT, inventory.get(GameData.ItemType.MEDKIT) - 1);
-        heal((int) Math.round(GameData.MEDKIT_HEAL * playerClass.healMult));
-        poisonTick = 0;
-        AssetLoader.playSound("pickup");
-        return true;
+        showHint("No manual healing - clear chambers (+3 HP/lv) or buy from Field NPC [B]!");
+        return false;
     }
 
     public void heal(int amount) {
@@ -256,34 +296,76 @@ public final class Player extends Entity {
         }
     }
 
-    /** Armour (and fortified base walls inside camp) reduces damage; right after a hit the player is briefly invulnerable. Returns damage taken. */
+    /** Armour and fortified hazard suit inside camp/chambers reduce damage; right after a hit the player is briefly invulnerable. Returns damage taken. */
     @Override
     public int takeDamage(int amount) {
         if (!alive || amount <= 0 || invulnerableTick > 0) {
             return 0;
         }
         double reduction = getArmorFraction();
-        if (map != null && map.getCampArea().contains((int) x, (int) y)) {
+        if (map != null && map.hasSafeCamp() && map.getCampArea().contains((int) x, (int) y)) {
             int wallLv = getLevel(GameData.RecipeKind.BASE_WALL);
             if (wallLv > 0) {
                 reduction = Math.min(0.85, reduction + wallLv * GameData.RecipeKind.BASE_WALL.perLevel);
             }
         }
-        int dealt = Math.max(1, (int) Math.round(amount * (1.0 - reduction)));
+        return applyDamageInternal(Math.max(1, (int) Math.round(amount * (1.0 - reduction))));
+    }
+
+    /** Damage from chamber environmental traps: mitigated by Hazard Suit, Armor, and Hazard Engineer perk. */
+    public int takeTrapDamage(int amount) {
+        if (!alive || amount <= 0 || invulnerableTick > 0) {
+            return 0;
+        }
+        double armorRed = getArmorFraction();
+        double suitRed = Math.min(0.45, getLevel(GameData.RecipeKind.BASE_WALL) * GameData.RecipeKind.BASE_WALL.perLevel);
+        int perkLv = getPerkLevel(GameData.TacticalPerk.TRAP_MASTER);
+        double trapMult = perkLv <= 0 ? 1.0 : Math.max(0.20, 1.0 - (0.45 + 0.10 * perkLv));
+        int dealt = Math.max(1, (int) Math.round(amount * (1.0 - armorRed) * (1.0 - suitRed) * trapMult));
+        return applyDamageInternal(dealt);
+    }
+
+    private int applyDamageInternal(int dealt) {
         hp -= dealt;
         hurtTick = HURT_TICKS;
         invulnerableTick = GameData.msToTicks(GameData.PLAYER_INVULNERABLE_MS);
         AssetLoader.playSound("hurt");
         if (hp <= 0) {
-            hp = 0;
-            die();
+            if (!tryDeathDefiance()) {
+                hp = 0;
+                die();
+            }
         }
         return dealt;
+    }
+
+    private boolean tryDeathDefiance() {
+        if (deathDefianceLeft <= 0) {
+            return false;
+        }
+        deathDefianceLeft--;
+        hp = Math.max(1, (int) Math.round(maxHp * 0.45));
+        poisonTick = 0;
+        invulnerableTick = GameData.msToTicks(1800);
+        showHint("DEATH DEFIANCE! Revived with 45% HP (" + deathDefianceLeft + " left)");
+        AssetLoader.playSound("win");
+        return true;
     }
 
     /** Toxic spit: a few damage pulses over time (shown as green bubbles). */
     public void applyPoison(int ticks) {
         poisonTick = Math.max(poisonTick, ticks);
+    }
+
+    /** Slows player movement temporarily from chamber traps; dashing breaks free. */
+    public synchronized void applyTrapSlow(int ticks) {
+        if (dashTick <= 0 && ticks > 0) {
+            trapSlowTicks = Math.max(trapSlowTicks, ticks);
+        }
+    }
+
+    public boolean isTrapSlowed() {
+        return trapSlowTicks > 0;
     }
 
     /** Removes active poison (Medical Tent or Camp Doctor treatment). */
@@ -304,15 +386,12 @@ public final class Player extends Entity {
     }
 
     // ------------------------------------------------------------------ loot and inventory
-    /** Takes a dropped item: adds it to the inventory (food also heals). Returns the "+2 Wood" label. */
+    /** Takes a dropped item: adds it to the inventory (manual healing disabled). Returns the "+2 Wood" label. */
     public synchronized String pickUp(DroppedItem item) {
         GameData.ItemType t = item.getType();
         item.markCollected();
         if (t == GameData.ItemType.CHEST) {
             return "";
-        }
-        if (t == GameData.ItemType.FOOD) {
-            heal(GameData.FOOD_HEAL * item.getAmount());
         }
         inventory.put(t, inventory.get(t) + item.getAmount());
         AssetLoader.playSound("pickup");
@@ -340,8 +419,77 @@ public final class Player extends Entity {
         return currentWeapon;
     }
 
+    public synchronized GameData.WeaponType getEquippedPrimaryGun() {
+        return equippedPrimaryGun;
+    }
+
+    /** Equips one unlocked firearm as the primary gun brought on runs alongside the Survival Knife. */
+    public synchronized void selectPrimaryGun(GameData.WeaponType w) {
+        if (w == GameData.WeaponType.KNIFE) {
+            switchWeapon(GameData.WeaponType.KNIFE);
+            return;
+        }
+        if (w == null || w.melee || !ownedWeapons.contains(w)) {
+            return;
+        }
+        equippedPrimaryGun = w;
+        switchWeapon(w);
+    }
+
+    public synchronized GameData.WeaponType getTempChamberWeapon() {
+        return tempChamberWeapon;
+    }
+
+    /** Grants a temporary weapon valid only for the current combat chamber, plus bonus ammo. */
+    public synchronized void grantTempChamberWeapon(GameData.WeaponType w, int bonusAmmo) {
+        if (w == null) {
+            return;
+        }
+        tempChamberWeapon = w;
+        if (bonusAmmo > 0) {
+            inventory.put(GameData.ItemType.AMMO, inventory.get(GameData.ItemType.AMMO) + bonusAmmo);
+        }
+        currentWeapon = w;
+        shootAnimTick = -1;
+        swingTick = 0;
+        flickerTick = FLICKER_TICKS;
+        fireCooldown = 6;
+        AssetLoader.playSound("craft");
+    }
+
+    /** Expires any temporary chamber weapon when leaving a chamber or returning to camp. */
+    public synchronized void clearTempChamberWeapon() {
+        if (tempChamberWeapon != null) {
+            boolean wasHoldingTemp = (currentWeapon == tempChamberWeapon);
+            tempChamberWeapon = null;
+            if (wasHoldingTemp) {
+                if (equippedPrimaryGun != null && ownedWeapons.contains(equippedPrimaryGun)) {
+                    currentWeapon = equippedPrimaryGun;
+                } else {
+                    currentWeapon = GameData.WeaponType.KNIFE;
+                }
+            }
+        }
+    }
+
     public synchronized boolean ownsWeapon(GameData.WeaponType w) {
-        return ownedWeapons.contains(w);
+        return ownedWeapons.contains(w) || (w != null && w == tempChamberWeapon);
+    }
+
+    public synchronized boolean canUseWeaponInRun(GameData.WeaponType w, boolean inSafeCamp) {
+        if (w == null) {
+            return false;
+        }
+        if (w == tempChamberWeapon && !inSafeCamp) {
+            return true;
+        }
+        if (!ownedWeapons.contains(w)) {
+            return false;
+        }
+        if (inSafeCamp) {
+            return true;
+        }
+        return w == GameData.WeaponType.KNIFE || w == equippedPrimaryGun;
     }
 
     /** Owned weapons in hotkey order (1 = Knife ... 8 = Rocket Launcher). */
@@ -349,9 +497,24 @@ public final class Player extends Entity {
         return Collections.unmodifiableList(new ArrayList<>(ownedWeapons));
     }
 
+    public synchronized List<GameData.WeaponType> getRunAvailableWeapons(boolean inSafeCamp) {
+        if (inSafeCamp) {
+            return getOwnedWeapons();
+        }
+        List<GameData.WeaponType> list = new ArrayList<>();
+        list.add(GameData.WeaponType.KNIFE);
+        if (equippedPrimaryGun != null && ownedWeapons.contains(equippedPrimaryGun)) {
+            list.add(equippedPrimaryGun);
+        }
+        if (tempChamberWeapon != null && !list.contains(tempChamberWeapon)) {
+            list.add(tempChamberWeapon);
+        }
+        return Collections.unmodifiableList(list);
+    }
+
     /** Ignored if the weapon is not owned or already in hand. */
     public synchronized void switchWeapon(GameData.WeaponType w) {
-        if (w == null || !ownedWeapons.contains(w) || w == currentWeapon) {
+        if (w == null || (!ownedWeapons.contains(w) && w != tempChamberWeapon) || w == currentWeapon) {
             return;
         }
         currentWeapon = w;
@@ -362,12 +525,92 @@ public final class Player extends Entity {
         AssetLoader.playSound("click");
     }
 
-    /** Mouse wheel: next (+1) or previous (-1) owned weapon. */
+    /** Mouse wheel: next (+1) or previous (-1) available weapon. */
     public synchronized void cycleWeapon(int direction) {
-        List<GameData.WeaponType> list = new ArrayList<>(ownedWeapons);
-        int i = list.indexOf(currentWeapon);
+        cycleWeapon(direction, true);
+    }
+
+    public synchronized void cycleWeapon(int direction, boolean inSafeCamp) {
+        List<GameData.WeaponType> list = new ArrayList<>(getRunAvailableWeapons(inSafeCamp));
+        if (list.isEmpty()) {
+            return;
+        }
+        int i = Math.max(0, list.indexOf(currentWeapon));
         int next = Math.floorMod(i + (direction >= 0 ? 1 : -1), list.size());
         switchWeapon(list.get(next));
+    }
+
+    // ------------------------------------------------------------------ roguelite perks & meta reset
+    public synchronized void addPerk(GameData.TacticalPerk perk) {
+        if (perk != null) {
+            int prev = runPerks.get(perk);
+            runPerks.put(perk, Math.min(3, prev + 1));
+            if (perk == GameData.TacticalPerk.VAMPIRIC_BLADE && prev < 3) {
+                maxHp += 10;
+                heal(10);
+            }
+        }
+    }
+
+    /** Hades-style recovery: +3 HP per level of Vitality Siphon (BASE_MEDIC) and Chthonic Vitality perk, +3 for Medic class. */
+    public synchronized int getChamberClearHeal() {
+        int siphonLv = levels.get(GameData.RecipeKind.BASE_MEDIC);
+        int perkLv = getPerkLevel(GameData.TacticalPerk.VAMPIRIC_BLADE);
+        int classBonus = (playerClass == GameData.PlayerClass.MEDIC) ? 3 : 0;
+        return (siphonLv + perkLv) * GameData.CHAMBER_CLEAR_HEAL_PER_LEVEL + classBonus;
+    }
+
+    public synchronized int getPerkLevel(GameData.TacticalPerk perk) {
+        return perk == null ? 0 : runPerks.get(perk);
+    }
+
+    public synchronized Map<GameData.TacticalPerk, Integer> getRunPerks() {
+        return new EnumMap<>(runPerks);
+    }
+
+    public synchronized int getDeathDefianceLeft() {
+        return deathDefianceLeft;
+    }
+
+    /**
+     * Resets temporary in-run Perks and run consumables when returning to Safe Camp Hub,
+     * while preserving 100% of permanent salvage materials, unlocked weapons, and permanent levels.
+     */
+    public synchronized void prepareForSafeCamp(boolean keepExistingSupplies) {
+        alive = true;
+        deathTick = 0;
+        poisonTick = 0;
+        hurtTick = 0;
+        dashTick = 0;
+        dashCooldown = 0;
+        trapSlowTicks = 0;
+        invulnerableTick = 0;
+        clearTempChamberWeapon();
+        maxHp = GameData.PLAYER_BASE_HP + playerClass.bonusMaxHp
+                + levels.get(GameData.RecipeKind.MAX_HP) * (int) GameData.RecipeKind.MAX_HP.perLevel;
+        hp = maxHp;
+        for (GameData.TacticalPerk p : GameData.TacticalPerk.values()) {
+            runPerks.put(p, 0);
+        }
+        deathDefianceLeft = levels.get(GameData.RecipeKind.DEATH_DEFIANCE);
+
+        int farmLv = levels.get(GameData.RecipeKind.BASE_FARM);
+        int startAmmo = GameData.PLAYER_START_AMMO + playerClass.bonusAmmo + farmLv * 25;
+        int startGrenades = playerClass.startGrenades + (farmLv >= 2 ? 1 : 0) + (farmLv >= 3 ? 1 : 0);
+        inventory.put(GameData.ItemType.MEDKIT, 0);
+        if (keepExistingSupplies) {
+            inventory.put(GameData.ItemType.AMMO, Math.max(inventory.get(GameData.ItemType.AMMO), startAmmo));
+            inventory.put(GameData.ItemType.GRENADE, Math.max(inventory.get(GameData.ItemType.GRENADE), startGrenades));
+        } else {
+            inventory.put(GameData.ItemType.AMMO, startAmmo);
+            inventory.put(GameData.ItemType.GRENADE, startGrenades);
+            inventory.put(GameData.ItemType.FOOD, 0);
+        }
+        if (equippedPrimaryGun != null && ownedWeapons.contains(equippedPrimaryGun)) {
+            currentWeapon = equippedPrimaryGun;
+        } else {
+            currentWeapon = GameData.WeaponType.KNIFE;
+        }
     }
 
     // ------------------------------------------------------------------ crafting
@@ -467,12 +710,31 @@ public final class Player extends Entity {
         switch (r.kind) {
             case WEAPON:
                 ownedWeapons.add(r.weapon);
+                if (!r.weapon.melee) {
+                    equippedPrimaryGun = r.weapon;
+                }
                 currentWeapon = r.weapon;
                 flickerTick = FLICKER_TICKS;
-                return "Crafted " + r.weapon.displayName + paid;
+                return "Unlocked & Equipped " + r.weapon.displayName + paid;
+            case DEATH_DEFIANCE:
+                levels.put(r.kind, levels.get(r.kind) + 1);
+                deathDefianceLeft++;
+                return r.name + " -> Lv " + levels.get(r.kind) + " (Revives: " + deathDefianceLeft + ")" + paid;
             case MEDKIT:
                 inventory.put(GameData.ItemType.MEDKIT, inventory.get(GameData.ItemType.MEDKIT) + 1);
-                return "Crafted a Medkit" + paid;
+                return "Packed +1 Medkit" + paid;
+            case BASE_MEDIC:
+                levels.put(r.kind, levels.get(r.kind) + 1);
+                int perClear = levels.get(r.kind) * GameData.CHAMBER_CLEAR_HEAL_PER_LEVEL;
+                return r.name + " -> Lv " + levels.get(r.kind) + " (+" + perClear + " HP/chamber)" + paid;
+            case BASE_FARM:
+                int newFarm = levels.get(r.kind) + 1;
+                levels.put(r.kind, newFarm);
+                inventory.put(GameData.ItemType.AMMO, inventory.get(GameData.ItemType.AMMO) + 25);
+                if (newFarm >= 2) {
+                    inventory.put(GameData.ItemType.GRENADE, inventory.get(GameData.ItemType.GRENADE) + 1);
+                }
+                return r.name + " -> Lv " + newFarm + " (+25 Ammo)" + paid;
             case HEAL_NOW:
                 heal((int) GameData.RecipeKind.HEAL_NOW.perLevel);
                 curePoison();
@@ -503,7 +765,8 @@ public final class Player extends Entity {
     }
 
     public double getMoveSpeed() {
-        return speed * playerClass.speedMult * (1.0 + GameData.RecipeKind.SPEED.perLevel * levels.get(GameData.RecipeKind.SPEED));
+        double trapFactor = trapSlowTicks > 0 ? 0.58 : 1.0;
+        return speed * playerClass.speedMult * (1.0 + GameData.RecipeKind.SPEED.perLevel * levels.get(GameData.RecipeKind.SPEED)) * trapFactor;
     }
 
     public double getPickupRadius() {
@@ -520,15 +783,18 @@ public final class Player extends Entity {
         return (int) Math.round(getArmorFraction() * 100);
     }
 
-    /** Damage of one hit/pellet of weapon w with all bonuses. */
+    /** Damage of one hit/pellet of weapon w with permanent upgrades and in-run Perks. */
     public int getWeaponDamage(GameData.WeaponType w) {
-        double mult = playerClass.damageMult * (1.0 + GameData.RecipeKind.DAMAGE.perLevel * levels.get(GameData.RecipeKind.DAMAGE));
-        return (int) Math.round(w.damage * mult);
+        double perm = 1.0 + GameData.RecipeKind.DAMAGE.perLevel * levels.get(GameData.RecipeKind.DAMAGE);
+        double perk = 1.0 + 0.20 * getPerkLevel(GameData.TacticalPerk.HIGH_CALIBER);
+        return (int) Math.round(w.damage * playerClass.damageMult * perm * perk);
     }
 
-    /** Ticks between two shots of weapon w with all bonuses. */
+    /** Ticks between two shots of weapon w with permanent upgrades and in-run Perks. */
     public int getCooldownTicks(GameData.WeaponType w) {
-        double mult = playerClass.cooldownMult * (1.0 - GameData.RecipeKind.FIRE_RATE.perLevel * levels.get(GameData.RecipeKind.FIRE_RATE));
+        double perm = 1.0 - GameData.RecipeKind.FIRE_RATE.perLevel * levels.get(GameData.RecipeKind.FIRE_RATE);
+        double perk = Math.max(0.45, 1.0 - 0.16 * getPerkLevel(GameData.TacticalPerk.RAPID_TRIGGER));
+        double mult = Math.max(0.25, playerClass.cooldownMult * perm * perk);
         return GameData.msToTicks((int) Math.round(w.cooldownMs * mult));
     }
 
@@ -538,9 +804,9 @@ public final class Player extends Entity {
         return 1.0 - Math.min(1.0, fireCooldown / (double) total);
     }
 
-    /** The class's bonus to every drop chance (pass to Monster.rollDrops). */
+    /** The class + run-perk bonus to every drop chance (pass to Monster.rollDrops). */
     public int getLootBonus() {
-        return playerClass.lootBonusPercent;
+        return playerClass.lootBonusPercent + getPerkLevel(GameData.TacticalPerk.SALVAGE_JACKPOT) * 25;
     }
 
     public double getAimAngle() {
@@ -595,8 +861,14 @@ public final class Player extends Entity {
             drawFrame(g2, frame, 1.0, facingLeft);
             return;
         }
-        // blink while invulnerable
-        if (invulnerableTick > 0 && (invulnerableTick / 3) % 2 == 1) {
+        // blink while invulnerable (unless actively dashing, which draws a cyan speed ring)
+        if (dashTick > 0) {
+            Composite oldC = g2.getComposite();
+            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.45f));
+            g2.setColor(new Color(120, 225, 255));
+            g2.fillOval((int) Math.round(x - 10), (int) Math.round(getFeetY() - 8), 20, 9);
+            g2.setComposite(oldC);
+        } else if (invulnerableTick > 0 && (invulnerableTick / 3) % 2 == 1) {
             return;
         }
         drawShadow(g2, 16);

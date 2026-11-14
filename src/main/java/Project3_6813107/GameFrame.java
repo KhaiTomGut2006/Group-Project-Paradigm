@@ -4,13 +4,17 @@
 // Natthanon Achachan          6813241
 package Project3_6813107;
 
+import java.awt.AlphaComposite;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Composite;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagLayout;
+import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.WindowAdapter;
@@ -23,10 +27,12 @@ import javax.swing.ImageIcon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
+import javax.swing.JDialog;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
+import javax.swing.JTextArea;
 import javax.swing.border.EmptyBorder;
 
 /**
@@ -123,7 +129,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         armorSegments = new JLabel();
         armorSegments.setToolTipText("Armour level (Workshop: Craft Armor Plating)");
         poisonedIcon = statusIcon("poisoned", "Poisoned: you lose HP for a few seconds");
-        injuredIcon = statusIcon("injured", "Badly hurt: press E to use a medkit");
+        injuredIcon = statusIcon("injured", "Badly hurt: clear chambers (+3/lv HP) or visit Field Merchant [B]");
         bleedingIcon = statusIcon("bleeding", "You were just hit");
         JPanel left = Theme.row(8, heartIcon, column(stack(hpBar), hpValueLabel),
                 column(armorSegments, Theme.caption("Armor")), Theme.row(2, poisonedIcon, injuredIcon, bleedingIcon));
@@ -175,7 +181,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         JPanel middle = Theme.transparentPanel(new GridBagLayout());   // centres the row vertically
         middle.add(backpackRow);
 
-        workshopButton = makeButton("Base NPC", Theme.ButtonStyle.RED, "b");
+        workshopButton = makeButton("Camp NPC", Theme.ButtonStyle.RED, "b");
         return makePlate(left, middle, centred(workshopButton));
     }
 
@@ -252,32 +258,48 @@ public final class GameFrame extends JFrame implements ActionListener {
             shownArmorLevel = armorLevel;
             armorSegments.setIcon(new ImageIcon(Theme.kit("bars/segments/health_segments_" + armorLevel + "of5", Theme.S)));
         }
-        armorSegments.setToolTipText("Armour " + p.getArmorPercent() + "% less damage (level " + armorLevel + " of 5)");
+        armorSegments.setToolTipText("Armor " + p.getArmorPercent() + "% reduction | Death Defiance revives left: "
+                + p.getDeathDefianceLeft() + " | Active Perks: " + gamePanel.getTotalPerkLevels());
         poisonedIcon.setVisible(p.isPoisoned());
         injuredIcon.setVisible(p.isAlive() && hpPercent < 30);
         bleedingIcon.setVisible(p.isHurt());
         refreshWaveAndTime();
-        scoreValueLabel.setText(gamePanel.getAllyCount() + " NPC");
+        scoreValueLabel.setText(gamePanel.getAllyCount() + " NPC / " + p.getDeathDefianceLeft() + " DD");
         killsValueLabel.setText(String.valueOf(gamePanel.getKills()));
         pauseButton.setText(gamePanel.isPaused() ? "RESUME" : "PAUSE");
-        hotbar.update(p);
+        workshopButton.setText(gamePanel.getChamber() > 0 ? "Shop NPC" : "Camp NPC");
+        workshopButton.setToolTipText(gamePanel.getChamber() > 0
+                ? "Open Field Merchant (3 Random Chamber Offers) [B]"
+                : "Talk to Safe Camp NPCs [B]");
+        hotbar.update(p, gamePanel.isInSafeCamp());
         ammoView.update(p);
         refreshBackpack(p.getInventory());
     }
 
     private void refreshWaveAndTime() {
-        int day = gamePanel.getDay();
-        int elapsed = gamePanel.getElapsedSeconds();
-        int left = Math.max(0, gamePanel.getTimeLimitSeconds() - elapsed);
-        int phaseLeft = Math.max(0, gamePanel.getPhaseSecondsRemaining());
-        String status = gamePanel.isNight()
-                ? "DAY " + day + " NIGHT - DAWN " + formatTime(phaseLeft)
-                : "DAY " + day + " DAY - NIGHT " + formatTime(phaseLeft);
+        int c = gamePanel.getChamber();
+        if (c == 0) {
+            waveLabel.setText("SAFE CAMP HUB - RUN #" + gamePanel.getRunNumber());
+            waveLabel.setColor(new Color(0x88D470));
+            waveBar.setValue(100);
+            timerLabel.setText("GATE [F]");
+            timerLabel.setColor(Theme.GOLD);
+            return;
+        }
+        String act = gamePanel.getActLabel(c);
+        String cType = gamePanel.getCurrentChamberType().displayName.toUpperCase();
+        String status = act + " - CH " + c + (c <= 15 ? "/15" : "+") + " (" + cType + ")";
         waveLabel.setText(status);
-        waveLabel.setColor(gamePanel.isNight() ? Theme.RED : (gamePanel.isPlayerInBase() ? new Color(0x88D470) : Theme.GOLD));
-        waveBar.setValue(gamePanel.getDayCycleProgressPercent());
-        timerLabel.setText(formatTime(left));
-        timerLabel.setColor(left <= 30 ? Theme.GOLD : Theme.TEXT);
+        boolean clear = gamePanel.isChamberCleared();
+        waveLabel.setColor(clear ? new Color(0x88D470) : (c % 5 == 0 ? Theme.RED : Theme.GOLD));
+        waveBar.setValue(gamePanel.getChamberClearPercent());
+        if (clear) {
+            timerLabel.setText("PORTAL [F]");
+            timerLabel.setColor(new Color(0x88D470));
+        } else {
+            timerLabel.setText("FOES: " + gamePanel.getHostilesRemaining());
+            timerLabel.setColor(c % 5 == 0 ? Theme.RED : Theme.TEXT);
+        }
     }
 
     /** A kit slot for every item you hold; the row only re-lays out when that set changes. */
@@ -319,24 +341,30 @@ public final class GameFrame extends JFrame implements ActionListener {
         private static final GameData.WeaponType[] WEAPONS = GameData.HOTBAR_WEAPONS;
         private final transient BufferedImage[] icons = new BufferedImage[WEAPONS.length];
         private final boolean[] owned = new boolean[WEAPONS.length];
+        private final boolean[] allowedInRun = new boolean[WEAPONS.length];
         private GameData.WeaponType current;
+        private GameData.WeaponType tempWeapon;
 
         HotbarView() {
             for (int i = 0; i < WEAPONS.length; i++) {
                 icons[i] = Theme.fit(AssetLoader.getWeaponIcon(WEAPONS[i]), 32, 32);
             }
             setPreferredSize(new Dimension(Theme.hotbarWidth(WEAPONS.length, Theme.S), 26 * Theme.S));
-            setToolTipText("Weapons: press 1-7 or turn the mouse wheel");
+            setToolTipText("Camp: equip 1 Firearm (2-8) for your run | Chamber: Knife [1] + Gun + TMP Rental");
         }
 
-        void update(Player p) {
+        void update(Player p, boolean inSafeCamp) {
             List<GameData.WeaponType> mine = p.getOwnedWeapons();
-            boolean changed = p.getCurrentWeapon() != current;
+            GameData.WeaponType tmp = p.getTempChamberWeapon();
+            boolean changed = p.getCurrentWeapon() != current || tmp != tempWeapon;
             current = p.getCurrentWeapon();
+            tempWeapon = tmp;
             for (int i = 0; i < WEAPONS.length; i++) {
-                boolean has = mine.contains(WEAPONS[i]);
-                changed |= has != owned[i];
+                boolean has = mine.contains(WEAPONS[i]) || WEAPONS[i] == tmp;
+                boolean canRun = p.canUseWeaponInRun(WEAPONS[i], inSafeCamp);
+                changed |= has != owned[i] || canRun != allowedInRun[i];
                 owned[i] = has;
+                allowedInRun[i] = canRun;
             }
             if (changed) {
                 repaint();
@@ -351,25 +379,35 @@ public final class GameFrame extends JFrame implements ActionListener {
             for (int i = 0; i < WEAPONS.length; i++) {
                 int x = (3 + i * 22) * s, y = 3 * s;
                 Theme.SlotKind kind = !owned[i] ? Theme.SlotKind.LOCKED
-                        : WEAPONS[i] == current ? Theme.SlotKind.SELECTED : Theme.SlotKind.NORMAL;
+                        : WEAPONS[i] == current ? Theme.SlotKind.SELECTED
+                        : allowedInRun[i] ? Theme.SlotKind.NORMAL : Theme.SlotKind.EMPTY;
                 Theme.drawSlot(g2, kind, x, y, s);
                 if (owned[i]) {
                     BufferedImage icon = icons[i];
+                    Composite old = g2.getComposite();
+                    if (!allowedInRun[i]) {
+                        g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.32f));
+                    }
                     g2.drawImage(icon, x + (20 * s - icon.getWidth()) / 2, y + (20 * s - icon.getHeight()) / 2, null);
+                    g2.setComposite(old);
                 }
-                Theme.drawPixelTextShadow(g2, String.valueOf(i + 1), x + 3 * s, y + 3 * s, 1, owned[i] ? Theme.TEXT : Theme.TEXT_3);
+                Theme.drawPixelTextShadow(g2, String.valueOf(i + 1), x + 3 * s, y + 3 * s, 1,
+                        owned[i] && allowedInRun[i] ? Theme.TEXT : Theme.TEXT_3);
+                if (WEAPONS[i] == tempWeapon) {
+                    Theme.drawPixelTextShadow(g2, "TMP", x + 3 * s, y + 13 * s, 1, Theme.GOLD);
+                }
             }
             g2.dispose();
         }
     }
 
-    /** The kit's ammo counter with the ammo you carry ("INF" for the pistol, "--" for melee). */
+    /** The kit's ammo counter ("--" for melee, numeric count for all firearms). */
     private static final class AmmoView extends JComponent {
         private static final long serialVersionUID = 1L;
         private String text = "0";
 
         AmmoView() {
-            setToolTipText("Ammo: shared by every gun except the pistol");
+            setToolTipText("Ammo: consumed by all unlocked firearms (Survival Knife uses 0 ammo)");
             setPreferredSize(new Dimension(Theme.ammoCounterWidth("000", Theme.S), 16 * Theme.S));
         }
 
@@ -393,8 +431,10 @@ public final class GameFrame extends JFrame implements ActionListener {
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
         if (source == workshopButton) {
-            if (!gamePanel.isPlayerInBase()) {
-                gamePanel.getPlayer().showHint("Return to Base Camp (green icon) to talk to NPCs!");
+            if (gamePanel.getChamber() > 0) {
+                showFieldShopDialog();
+            } else if (!gamePanel.isPlayerInBase()) {
+                gamePanel.getPlayer().showHint("Camp NPCs are only available at the Safe Camp Hub!");
                 AssetLoader.playSound("click");
             } else {
                 openUpgradeDialog();
@@ -450,36 +490,223 @@ public final class GameFrame extends JFrame implements ActionListener {
         }
     }
 
+    /** Shows the Hades-style 3-choice Tactical Perk modal after clearing a Perk/Elite/Boss chamber. */
+    public void showPerkSelectionDialog(List<GameData.TacticalPerk> choices) {
+        if (dialogOpen || closed || gamePanel.isGameOver() || choices == null || choices.isEmpty()) {
+            return;
+        }
+        dialogOpen = true;
+        boolean wasPaused = gamePanel.isPaused();
+        gamePanel.pauseGame();
+        try {
+            JDialog dlg = new JDialog(this, "Choose a Tactical Perk", true);
+            dlg.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+            JPanel root = new JPanel(new BorderLayout(0, 14));
+            root.setBackground(Theme.BG);
+            root.setBorder(new EmptyBorder(18, 22, 18, 22));
+
+            Theme.PixelLabel header = new Theme.PixelLabel("CHAMBER CLEARED - CHOOSE 1 TACTICAL PERK", 3, Theme.GOLD);
+            header.setShadow(true);
+            JPanel top = Theme.transparentPanel(new GridBagLayout());
+            top.add(header);
+            root.add(top, BorderLayout.NORTH);
+
+            JPanel grid = Theme.transparentPanel(new GridLayout(1, choices.size(), 12, 0));
+            Player p = gamePanel.getPlayer();
+            for (GameData.TacticalPerk perk : choices) {
+                Theme.Card card = new Theme.Card(new BorderLayout(0, 8), Theme.Panel.PAPER);
+                card.setPreferredSize(new Dimension(235, 220));
+                int curLv = p.getPerkLevel(perk);
+                String lvTag = curLv == 0 ? "NEW LV 1" : "LV " + curLv + " -> " + (curLv + 1);
+                Theme.PixelLabel title = new Theme.PixelLabel(perk.displayName.toUpperCase(), 2, Theme.DARK_RED);
+                Theme.PixelLabel lvLabel = new Theme.PixelLabel(lvTag, 2, Theme.DARK_GREEN);
+                JPanel head = Theme.transparentPanel(new BorderLayout(0, 4));
+                head.add(title, BorderLayout.NORTH);
+                head.add(lvLabel, BorderLayout.SOUTH);
+                card.add(head, BorderLayout.NORTH);
+
+                JTextArea desc = new JTextArea(perk.description);
+                desc.setEditable(false);
+                desc.setLineWrap(true);
+                desc.setWrapStyleWord(true);
+                desc.setOpaque(false);
+                desc.setFont(Theme.font(Font.PLAIN, 13));
+                desc.setForeground(Theme.PAPER_TEXT);
+                card.add(desc, BorderLayout.CENTER);
+
+                JButton pickBtn = Theme.button("CHOOSE", Theme.ButtonStyle.RED);
+                pickBtn.addActionListener(ev -> {
+                    gamePanel.applyChosenPerk(perk);
+                    dlg.dispose();
+                });
+                card.add(pickBtn, BorderLayout.SOUTH);
+                grid.add(card);
+            }
+            root.add(grid, BorderLayout.CENTER);
+            dlg.setContentPane(root);
+            dlg.pack();
+            dlg.setResizable(false);
+            dlg.setLocationRelativeTo(this);
+            dlg.setVisible(true);
+        } finally {
+            dialogOpen = false;
+        }
+        if (closed) {
+            return;
+        }
+        if (!wasPaused) {
+            gamePanel.resumeGame();
+        }
+        refreshHud();
+        gamePanel.requestFocusInWindow();
+    }
+
+    /** Opens the chamber Field Merchant offering 3 random items (Heal, 1-Chamber Weapon, Tactical Perk). */
+    public void showFieldShopDialog() {
+        if (dialogOpen || closed || gamePanel.isGameOver() || gamePanel.getChamber() <= 0) {
+            return;
+        }
+        List<GamePanel.FieldShopOffer> offers = gamePanel.getFieldShopOffers();
+        dialogOpen = true;
+        boolean wasPaused = gamePanel.isPaused();
+        gamePanel.pauseGame();
+        try {
+            JDialog dlg = new JDialog(this, "Field Merchant - Chamber " + gamePanel.getChamber(), true);
+            JPanel root = new JPanel(new BorderLayout(0, 12));
+            root.setBackground(Theme.BG);
+            root.setBorder(new EmptyBorder(16, 20, 16, 20));
+
+            Player p = gamePanel.getPlayer();
+            Theme.PixelLabel header = new Theme.PixelLabel(
+                    "FIELD MERCHANT - 3 RANDOM OFFERS (CH " + gamePanel.getChamber() + ")", 3, Theme.GOLD);
+            header.setShadow(true);
+            Theme.PixelLabel scrapsLabel = new Theme.PixelLabel(
+                    "SCRAPS: " + p.getItemCount(GameData.ItemType.SCRAPS)
+                            + "  |  HP: " + p.getHp() + "/" + p.getMaxHp(), 2, Theme.TEXT);
+            JPanel top = Theme.transparentPanel(new BorderLayout(0, 6));
+            top.add(centred(header), BorderLayout.NORTH);
+            top.add(centred(scrapsLabel), BorderLayout.SOUTH);
+            root.add(top, BorderLayout.NORTH);
+
+            JLabel feedbackLabel = Theme.label(
+                    "Pick any offer using Scraps. Temporary weapons vanish when entering the next chamber.",
+                    Font.PLAIN, 13, Theme.TEXT_2);
+            JPanel grid = Theme.transparentPanel(new GridLayout(1, Math.max(1, offers.size()), 12, 0));
+            for (int i = 0; i < offers.size(); i++) {
+                final int idx = i;
+                GamePanel.FieldShopOffer offer = offers.get(i);
+                Theme.Card card = new Theme.Card(new BorderLayout(0, 8), Theme.Panel.PAPER);
+                card.setPreferredSize(new Dimension(238, 226));
+
+                String kindTag = offer.kind == GamePanel.FieldShopOffer.OfferKind.HEAL ? "FIELD RECOVERY"
+                        : offer.kind == GamePanel.FieldShopOffer.OfferKind.TEMP_WEAPON ? "TEMP WEAPON (1 CH)"
+                        : "TACTICAL PERK";
+                Color kindCol = offer.kind == GamePanel.FieldShopOffer.OfferKind.HEAL ? Theme.DARK_GREEN
+                        : offer.kind == GamePanel.FieldShopOffer.OfferKind.TEMP_WEAPON ? Theme.DARK_RED
+                        : new Color(0x7A4B00);
+                Theme.PixelLabel kindLbl = new Theme.PixelLabel(kindTag, 2, kindCol);
+                Theme.PixelLabel titleLbl = new Theme.PixelLabel(offer.title.toUpperCase(), 2, Theme.PAPER_TEXT);
+                JPanel head = Theme.transparentPanel(new BorderLayout(0, 4));
+                head.add(kindLbl, BorderLayout.NORTH);
+                head.add(titleLbl, BorderLayout.SOUTH);
+                card.add(head, BorderLayout.NORTH);
+
+                JTextArea desc = new JTextArea(offer.detail);
+                desc.setEditable(false);
+                desc.setLineWrap(true);
+                desc.setWrapStyleWord(true);
+                desc.setOpaque(false);
+                desc.setFont(Theme.font(Font.PLAIN, 13));
+                desc.setForeground(Theme.PAPER_TEXT);
+                card.add(desc, BorderLayout.CENTER);
+
+                JButton buyBtn = Theme.button(offer.sold ? "SOLD" : ("BUY - " + offer.costScraps + " SCRAPS"),
+                        offer.sold ? Theme.ButtonStyle.GREY : Theme.ButtonStyle.RED);
+                buyBtn.setEnabled(!offer.sold);
+                buyBtn.addActionListener(ev -> {
+                    String msg = gamePanel.buyFieldShopOffer(idx);
+                    feedbackLabel.setText(msg);
+                    scrapsLabel.setText("SCRAPS: " + p.getItemCount(GameData.ItemType.SCRAPS)
+                            + "  |  HP: " + p.getHp() + "/" + p.getMaxHp());
+                    if (offer.sold) {
+                        buyBtn.setText("SOLD");
+                        buyBtn.setEnabled(false);
+                    }
+                    refreshHud();
+                });
+                card.add(buyBtn, BorderLayout.SOUTH);
+                grid.add(card);
+            }
+            root.add(grid, BorderLayout.CENTER);
+
+            JButton closeBtn = Theme.button("CLOSE", Theme.ButtonStyle.GREY);
+            closeBtn.addActionListener(ev -> dlg.dispose());
+            JPanel bottom = Theme.transparentPanel(new BorderLayout(0, 8));
+            bottom.add(centred(feedbackLabel), BorderLayout.NORTH);
+            bottom.add(centred(closeBtn), BorderLayout.SOUTH);
+            root.add(bottom, BorderLayout.SOUTH);
+
+            dlg.setContentPane(root);
+            dlg.pack();
+            dlg.setResizable(false);
+            dlg.setLocationRelativeTo(this);
+            dlg.setVisible(true);
+        } finally {
+            dialogOpen = false;
+        }
+        if (closed) {
+            return;
+        }
+        if (!wasPaused) {
+            gamePanel.resumeGame();
+        }
+        refreshHud();
+        gamePanel.requestFocusInWindow();
+    }
+
     // ------------------------------------------------------------------ end of the run
-    /** Called once by GamePanel: save the score, show the summary, go back to the launcher. */
+    /** Called when a run ends by death or Victory Extract: save score & let player Return to Safe Camp. */
     public void onGameOver(boolean survived) {
         if (finished || closed) {
             return;
         }
         finished = true;
         refreshHud();
+        Player p = gamePanel.getPlayer();
         GameData.ScoreEntry entry = new GameData.ScoreEntry();
-        entry.name = gamePanel.getPlayer().getPlayerName();
-        entry.playerClass = gamePanel.getPlayer().getPlayerClass().displayName;
+        entry.name = p.getPlayerName();
+        entry.playerClass = p.getPlayerClass().displayName;
         entry.map = settings.map == null ? "-" : settings.map.displayName;
         entry.score = gamePanel.getScore();
         entry.kills = gamePanel.getKills();
-        entry.wave = gamePanel.getWave();
+        entry.wave = Math.max(1, gamePanel.getHighestChamberReached());
         entry.seconds = gamePanel.getElapsedSeconds();
         GameData.saveScore(entry);
+
+        String salvageSummary = p.getItemCount(GameData.ItemType.SCRAPS) + " Scrap, "
+                + p.getItemCount(GameData.ItemType.STEEL) + " Steel, "
+                + p.getItemCount(GameData.ItemType.ELECTRONICS) + " Parts, "
+                + p.getItemCount(GameData.ItemType.BLUEPRINT) + " BP";
         String[][] stats = {
-            {"Days survived", entry.wave + " / 10"},
+            {"Highest Chamber", entry.wave + (entry.wave >= 15 ? " (CLEARED ACT 3)" : " / 15")},
             {"Infected killed", String.valueOf(entry.kills)},
-            {"Base upgrades", gamePanel.getTotalBaseLevel() + " built"},
+            {"Permanent Salvage", salvageSummary},
             {"Survival time", formatTime(entry.seconds)},
-            {"Region", entry.map.toUpperCase()}
+            {"Run #", String.valueOf(gamePanel.getRunNumber())}
         };
-        Theme.ask(this, Theme.Panel.METAL, survived ? "titles/survived" : "titles/game_over",
-                survived ? "Survived" : "Game over",
-                (survived ? "Extraction arrived and the camp held through the night. " : "The infected overwhelmed you. ")
-                        + "Your survival log is saved.",
-                stats, "Continue", null);
-        closeGame();
+        boolean backToCamp = Theme.ask(this, Theme.Panel.METAL, survived ? "titles/survived" : "titles/game_over",
+                survived ? "Expedition Complete!" : "Fallen in Chamber " + Math.max(1, gamePanel.getChamber()),
+                (survived ? "You extracted from the Dead Zone in triumph! "
+                        : "You fell in combat, but 100% of your salvaged Steel, Parts & Blueprints stay with you in Safe Camp. ")
+                        + "Spend salvage at Camp NPCs to unlock permanent power!",
+                stats, "Return to Safe Camp", "Main Menu");
+        if (backToCamp && !closed) {
+            finished = false;
+            gamePanel.returnToSafeCamp();
+            refreshHud();
+        } else {
+            closeGame();
+        }
     }
 
     /** Stops both game threads and the music, closes the window and shows the launcher again. */

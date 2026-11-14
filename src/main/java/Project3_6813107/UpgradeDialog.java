@@ -63,7 +63,7 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
     private static final long B_KEY_GRACE_MS = 400;   // see KeyCommand: ignore the B press that opened us
     private static final int ROW_HEIGHT = 28;
     private static final int DETAIL_WIDTH = 290;
-    private static final String GREETING = "Welcome back to camp! Craft guns, heal wounds, or build base defenses.";
+    private static final String GREETING = "Safe Camp Hub: keep 100% of Steel, Parts & Blueprints on death for permanent upgrades!";
 
     private enum RowState { READY, MISSING, LOCKED, DONE }
 
@@ -262,21 +262,29 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         showSelectedRecipe(false);   // also refreshes the backpack slots
     }
 
-    /** Crafts the selected recipe through Player.craft and shows the result (or the reason it failed). */
+    /** Crafts the selected recipe or equips an already unlocked firearm for the next run. */
     public void craftSelectedUpgrade() {
         GameData.UpgradeRecipe recipe = getSelectedRecipe();
         if (recipe == null) {
             showFeedback("Pick something in the list first.", Theme.PAPER_TEXT);
             return;
         }
+        if (recipe.kind == GameData.RecipeKind.WEAPON && recipe.weapon != null
+                && !recipe.weapon.melee && player.ownsWeapon(recipe.weapon)) {
+            player.selectPrimaryGun(recipe.weapon);
+            refreshTable();
+            showFeedback("Equipped " + recipe.weapon.displayName + " for your next expedition!", Theme.DARK_GREEN);
+            trader.setMessage("GUNSMITH: " + recipe.weapon.displayName + " is racked and ready. Step through the Gate [F]!");
+            return;
+        }
         String result = player.craft(recipe);
         refreshTable();
         if (result != null) {
             showFeedback(result, Theme.DARK_GREEN);
-            trader.setMessage("Done! " + shortName(recipe) + " is ready. Anything else?");
+            trader.setMessage("Done! " + shortName(recipe) + " is unlocked permanently. Anything else?");
         } else {
             showFeedback(capitalize(explainWhyNot(recipe)) + ".", Theme.DARK_RED);
-            trader.setMessage("I can't make that yet: " + explainWhyNot(recipe) + ".");
+            trader.setMessage("Not enough salvage yet: " + explainWhyNot(recipe) + ".");
         }
     }
 
@@ -360,20 +368,35 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         detailDescriptionArea.setText(r.description);
         detailIconLabel.setIcon(iconFor(r));
         detailLevelLabel.setText(status.startsWith("Lv") || status.startsWith("Have") || state == RowState.DONE
-                ? status.toUpperCase() : "");
+                ? (r.kind == GameData.RecipeKind.WEAPON && player.getEquippedPrimaryGun() == r.weapon ? "EQUIPPED" : status.toUpperCase())
+                : "");
         for (Map.Entry<GameData.ItemType, Integer> e : cost.entrySet()) {
             costList.add(costRow(e.getKey(), player.getItemCount(e.getKey()), e.getValue(), state == RowState.DONE));
         }
         costList.revalidate();
         costList.repaint();
-        craftButton.setText(actionLabelFor(r));
-        craftButton.setEnabled(state == RowState.READY);
+        boolean canEquip = r.kind == GameData.RecipeKind.WEAPON && r.weapon != null
+                && !r.weapon.melee && player.ownsWeapon(r.weapon);
+        boolean alreadyEquipped = canEquip && player.getEquippedPrimaryGun() == r.weapon;
+        if (alreadyEquipped) {
+            craftButton.setText("EQUIPPED");
+            craftButton.setEnabled(false);
+        } else if (canEquip) {
+            craftButton.setText("EQUIP FOR RUN");
+            craftButton.setEnabled(true);
+        } else {
+            craftButton.setText(actionLabelFor(r));
+            craftButton.setEnabled(state == RowState.READY);
+        }
         if (newSelection) {
             trader.setMessage(npcSpeakerLine(r));
         }
         if (newSelection || feedbackArea.getText().trim().isEmpty()) {
-            showFeedback(state == RowState.READY ? "Ready: " + actionLabelFor(r).toLowerCase() + " now." : capitalize(explainWhyNot(r)) + ".",
-                    state == RowState.READY ? Theme.DARK_GREEN : Theme.PAPER_TEXT);
+            String msg = alreadyEquipped ? "Equipped as your active primary firearm for expeditions."
+                    : canEquip ? "Owned: click EQUIP FOR RUN to bring this firearm outside."
+                    : state == RowState.READY ? "Ready: " + actionLabelFor(r).toLowerCase() + " now."
+                    : capitalize(explainWhyNot(r)) + ".";
+            showFeedback(msg, (canEquip && !alreadyEquipped) || state == RowState.READY ? Theme.DARK_GREEN : Theme.PAPER_TEXT);
         }
     }
 
@@ -384,11 +407,13 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
             case BASE_WALL:
             case BASE_MEDIC:
             case BASE_FARM:
-                return "BUILD";
+                return "UPGRADE";
+            case DEATH_DEFIANCE:
+                return "UNLOCK REVIVE";
             case HEAL_NOW:
                 return "HEAL NOW";
             default:
-                return "CRAFT";
+                return "UNLOCK";
         }
     }
 
@@ -397,17 +422,19 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
             case WEAPON:
             case DAMAGE:
             case FIRE_RATE:
-                return "GUNSMITH: Bring scavenged steel and parts, and I'll upgrade your firepower.";
+                return "GUNSMITH: Unlocked firearms stay in Camp Arsenal forever. Bring 1 Gun + Knife per run!";
             case BASE_TURRET:
             case BASE_WALL:
             case BASE_FARM:
-                return "ENGINEER: Let's fortify the camp perimeter before the next Horde Raid hits!";
+                return "ENGINEER: Squadmates, Hazard Suits & Supply Reserves carry into every future run.";
+            case DEATH_DEFIANCE:
             case BASE_MEDIC:
+                return "MEDIC: Upgrade Chthonic Vitality (+3 HP per chamber clear) & Death Defiance revives!";
             case HEAL_NOW:
             case MEDKIT:
-                return "MEDIC: Hurt from scavenging? I can patch you up or expand the medical tent.";
+                return "MEDIC: Portable medkits are disabled - rely on clear heals & the Field Merchant!";
             default:
-                return "TRAINER: Spend your loot to boost your survivor's speed, armour, and endurance.";
+                return "TRAINER: Permanent combat training stays with you across every death.";
         }
     }
 
@@ -448,17 +475,19 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
     private static String kindName(GameData.UpgradeRecipe r) {
         switch (r.kind) {
             case WEAPON:
-                return "WEAPON";
+                return "ARSENAL";
+            case DEATH_DEFIANCE:
+                return "SURVIVAL";
             case BASE_TURRET:
             case BASE_WALL:
             case BASE_MEDIC:
             case BASE_FARM:
-                return "BASE BUILD";
+                return "CAMP UPGRADE";
             case HEAL_NOW:
             case MEDKIT:
                 return "MEDICAL";
             default:
-                return "UPGRADE";
+                return "PERMANENT";
         }
     }
 
@@ -471,7 +500,8 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         if (r.kind == GameData.RecipeKind.WEAPON && r.weapon != null) {
             return new ImageIcon(Theme.fit(AssetLoader.getWeaponIcon(r.weapon), 64, 32));
         }
-        if (r.kind == GameData.RecipeKind.MEDKIT || r.kind == GameData.RecipeKind.HEAL_NOW || r.kind == GameData.RecipeKind.BASE_MEDIC) {
+        if (r.kind == GameData.RecipeKind.MEDKIT || r.kind == GameData.RecipeKind.HEAL_NOW
+                || r.kind == GameData.RecipeKind.BASE_MEDIC || r.kind == GameData.RecipeKind.DEATH_DEFIANCE) {
             return new ImageIcon(Theme.fit(AssetLoader.getItemIcon(GameData.ItemType.MEDKIT), 32, 32));
         }
         if (r.kind == GameData.RecipeKind.BASE_FARM) {

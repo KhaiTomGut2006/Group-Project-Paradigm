@@ -145,7 +145,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         title.add(Theme.row(0, new Theme.PixelLabel("EGCO 213 - GROUP PROJECT 3", 2, Theme.GOLD)));
         title.add(Theme.row(0, shadowed("LAST CAMP", 6, Theme.TEXT)));
         title.add(Theme.row(0, shadowed("SURVIVOR", 6, Theme.GOLD)));
-        title.add(Theme.row(0, new Theme.PixelLabel("SCAVENGE. BUILD CAMP. SURVIVE.", 2, Theme.TEXT_2)));
+        title.add(Theme.row(0, new Theme.PixelLabel("PREPARE AT CAMP. RAID CHAMBERS. EVOLVE.", 2, Theme.TEXT_2)));
         hero.add(title, BorderLayout.NORTH);
 
         JPanel crew = Theme.transparentPanel(new GridLayout(0, 1, 0, 4));
@@ -273,10 +273,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         mapCombo.addActionListener(this);
         mapInfoArea = Theme.textBlock("", 12, Theme.TEXT_2);
         mapInfoArea.setRows(2);
-        JTextArea gearArea = Theme.textBlock("Survival Knife (Melee) + Class Supplies.\n"
-                + "Scavenge parts outside to craft guns & fortify camp.", 12, Theme.TEXT_2);
+        JTextArea gearArea = Theme.textBlock("Survival Knife (Infinite) + 1 Unlocked Firearm.\n"
+                + "Permanent salvage stays 100% on death for Camp Upgrades.", 12, Theme.TEXT_2);
         JPanel loadout = Theme.transparentPanel(new GridLayout(1, 2, 14, 0));
-        loadout.add(fieldColumn("Starting Gear", Theme.label("Survival Knife Only", Font.BOLD, 13, Theme.GOLD), gearArea));
+        loadout.add(fieldColumn("Starting Gear", Theme.label("Knife + Camp Arsenal", Font.BOLD, 13, Theme.GOLD), gearArea));
         loadout.add(fieldColumn("Region", mapCombo, mapInfoArea));
         form.add(loadout, 14);
 
@@ -349,25 +349,26 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return onPanel(scorePages, Theme.Panel.METAL);
     }
 
-    /** How to play, written on the kit's paper note: goal, controls as key caps, the Day/Night survival loop. */
+    /** How to play, written on the kit's paper note: goal, controls as key caps, and the Roguelite loop. */
     private JComponent buildHelpPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
 
-        int totalDays = GameData.TIME_LIMIT_SECONDS / GameData.DAY_CYCLE_SECONDS;
-        howToArea = Theme.textBlock("Survive for " + formatTime(GameData.TIME_LIMIT_SECONDS) + " across " + totalDays
-                + " Day and Night cycles! You start with a Survival Knife and an armed NPC Ally: scavenge Supply Chests during"
-                + " each " + GameData.DAYLIGHT_SECONDS + "s Daylight, recruit extra NPCs & fortify Safe Camp [B] before Nightfall.",
+        howToArea = Theme.textBlock("Prepare in Safe Camp Hub (talk to Camp NPCs [B] to unlock permanent guns, allies,"
+                + " Vitality Siphon +3/ch heal, & Death Defiance). Step through the Gate [F] into 12+ procedural room styles"
+                + " across 15 chambers: manual Medkit/Food healing is OFF - visit the Field Merchant [B] inside each chamber"
+                + " for 3 random offers (Heal, 1-Chamber Temp Weapon, Perk) and choose Tactical Perks on clear!",
                 13, Theme.PAPER_TEXT);
-        form.add(new Theme.PixelLabel("SURVIVAL GOAL", 2, Theme.DARK_RED), 0);
+        form.add(new Theme.PixelLabel("ROGUELITE EXPEDITION LOOP", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 6);
 
         // each row: what it does, then the keys (sprites from the Hollow Creek UI kit)
         String[][] controls = {
             {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
-            {"Grenade", "mouse_right", "g"}, {"Medkit +" + GameData.MEDKIT_HEAL + " HP", "e"},
-            {"Switch weapon (1-7)", "mouse_mid"}, {"Talk to Base NPCs", "b"},
-            {"Pause", "p", "esc"}, {"Craft / Build / Heal", "enter"}
+            {"Dash (Dodge Traps)", "space", "shift"}, {"Enter Gate / Interact NPC", "f"},
+            {"Grenade", "mouse_right", "g"}, {"Vitality Info (Manual Heal Off)", "e"},
+            {"Switch weapon (1-8)", "mouse_mid"}, {"Camp NPC / Field Shop [3 Items]", "b"},
+            {"Pause", "p", "esc"}, {"Unlock / Equip", "enter"}
         };
         JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 6));
         for (String[] c : controls) {
@@ -377,10 +378,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 14);
         form.add(keys, 8);
 
-        form.add(new Theme.PixelLabel("DAYLIGHT, BASE NPC & NIGHTFALL", 2, Theme.DARK_RED), 14);
-        form.add(Theme.textBlock("Loot Scraps, Wood, Ammo, and Kits by day. Return inside Safe Camp (green minimap icon) and press B"
-                + " to talk to the Gunsmith, Doctor, and Engineer: craft your first Pistol and heavier guns (keys 1-7), upgrade stats,"
-                + " heal wounds, and build Guard Posts, Walls, Medical Tents, and Supply Depots to withstand Nightfall and Blood Moons.",
+        form.add(new Theme.PixelLabel("TRAPS, PERKS & PERMANENT SALVAGE", 2, Theme.DARK_RED), 14);
+        form.add(Theme.textBlock("Spikes, Toxic Pools, Shock Pylons & Landmines hurt BOTH you and zombies - dash [SPACE] through"
+                + " hazards or lure enemies into traps! Each run carries your Knife + 1 Gun from Camp Arsenal. If you fall, 100%"
+                + " of your Steel, Scraps, Electronics & Blueprints return with you to Safe Camp for permanent upgrades.",
                 13, Theme.PAPER_TEXT), 6);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);
@@ -709,7 +710,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
      */
     private static final class ScoreTableModel extends AbstractTableModel {
         private static final long serialVersionUID = 1L;
-        private static final String[] COLUMNS = {"NO.", "SURVIVOR", "REGION", "#DAYS", "#KILLS", "#TIME"};
+        private static final String[] COLUMNS = {"NO.", "SURVIVOR", "REGION", "#CHAMBER", "#KILLS", "#TIME"};
         private final transient List<GameData.ScoreEntry> rows = new ArrayList<>();
 
         void setScores(List<GameData.ScoreEntry> scores) {

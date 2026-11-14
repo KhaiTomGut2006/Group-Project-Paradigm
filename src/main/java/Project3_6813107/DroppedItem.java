@@ -95,11 +95,11 @@ public final class DroppedItem extends Entity {
             return;
         }
         double dist = distanceTo(collector);
-        if (flying || (age > 20 && dist < collector.getPickupRadius())) {
+        if (flying || (age > 8 && dist < collector.getPickupRadius())) {
             // magnet: accelerate towards the player; ignores walls so items never get stuck
             flying = true;
             flyTicks++;
-            double pull = Math.min(dist, Math.min(7.0, 1.5 + flyTicks * 0.2));
+            double pull = Math.min(dist, Math.min(11.5, 2.8 + flyTicks * 0.45));
             x += (collector.getX() - x) / Math.max(1, dist) * pull;
             y += (collector.getY() - y) / Math.max(1, dist) * pull;
         }
@@ -136,6 +136,17 @@ public final class DroppedItem extends Entity {
         alive = false;
     }
 
+    /** Pulls scattered drops quickly to the player once a combat chamber is cleared. */
+    public void forceMagnet() {
+        if (type != GameData.ItemType.CHEST) {
+            flying = true;
+        }
+    }
+
+    public boolean isFlying() {
+        return flying;
+    }
+
     /** True once, when an opened chest is ready to spill its loot. */
     public boolean isChestReadyToBurst() {
         return burst && openTick >= OPEN_TICKS && !collected;
@@ -146,12 +157,12 @@ public final class DroppedItem extends Entity {
         collected = true;
         List<DroppedItem> loot = new ArrayList<>();
         GameData.ItemType[] pool = {GameData.ItemType.AMMO, GameData.ItemType.STEEL, GameData.ItemType.ELECTRONICS,
-            GameData.ItemType.BATTERY, GameData.ItemType.MEDKIT, GameData.ItemType.GRENADE,
-            GameData.ItemType.ARMOR_VEST, GameData.ItemType.SCRAPS, GameData.ItemType.FOOD};
-        int count = 5 + rng.nextInt(3);
+            GameData.ItemType.BATTERY, GameData.ItemType.GRENADE,
+            GameData.ItemType.ARMOR_VEST, GameData.ItemType.SCRAPS};
+        int count = 2 + rng.nextInt(2);
         for (int i = 0; i < count; i++) {
             GameData.ItemType t = pool[rng.nextInt(pool.length)];
-            int n = t == GameData.ItemType.AMMO ? 15 + rng.nextInt(16) : 1 + rng.nextInt(2);
+            int n = t == GameData.ItemType.AMMO ? 8 + rng.nextInt(9) : 1;
             DroppedItem d = new DroppedItem(t, n, x, y, collector);
             d.setMap(map);
             d.scatter(rng);

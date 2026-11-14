@@ -315,6 +315,7 @@ public final class GameMap {
     private static final int DIRT_RGB = 0xAD7757;
 
     private final GameData.MapType type;
+    private final boolean safeHub;
     private final Random rng;
     private final int[][] terrain = new int[ROWS][COLS];
     private final boolean[][] wall = new boolean[ROWS][COLS];   // bunker walls (solid, drawn into the ground)
@@ -331,6 +332,8 @@ public final class GameMap {
     private final Rectangle playArea = new Rectangle(T, T, (COLS - 2) * T, (ROWS - 2) * T);
     private Rectangle campArea;          // world pixels
     private Point playerSpawn;
+    private Point gatePosition;
+    private String chamberLayoutName = "SAFE CAMP HUB";
     private final List<Point> spawnPoints = new ArrayList<>();
     private final List<Point> guardPosts = new ArrayList<>();
     private Point traderPosition;
@@ -339,6 +342,7 @@ public final class GameMap {
     private int appliedMedicLv;
     private int appliedFarmLv;
     private boolean[][] walkable;
+    private boolean[][] reachable;
     private boolean[][] openEast;     // can walk from (c, r) to (c + 1, r)
     private boolean[][] openSouth;    // can walk from (c, r) to (c, r + 1)
 
@@ -349,7 +353,12 @@ public final class GameMap {
 
     // ------------------------------------------------------------------ construction
     public GameMap(GameData.MapType type, long seed) {
+        this(type, seed, true);
+    }
+
+    public GameMap(GameData.MapType type, long seed, boolean safeHub) {
         this.type = type;
+        this.safeHub = safeHub;
         this.rng = new Random(seed);
         for (int i = 0; i < ROWS * COLS; i++) {
             solidsByCell.add(new ArrayList<>());
@@ -357,16 +366,19 @@ public final class GameMap {
         int campCol = COLS / 2 - 6, campRow = ROWS / 2 - 5;
         campArea = new Rectangle(campCol * T, campRow * T, 12 * T, 10 * T);
         playerSpawn = new Point(campArea.x + campArea.width / 2, campArea.y + campArea.height / 2 + T);
-        buildCamp();
-        // the camp's open middle must stay free of anything the map adds later
-        keepClear.add(new Rectangle(campArea.x + T, campArea.y + 3 * T, campArea.width - 2 * T, campArea.height - 3 * T));
-
-        switch (type) {
-            case WASTELAND_HIGHWAY: buildHighway(); break;
-            case SURVIVOR_CAMP: buildSurvivorCamp(); break;
-            case ABANDONED_BUNKER: buildBunker(); break;
-            case GAS_STATION: buildGasStation(); break;
-            default: buildQuarantine(); break;
+        gatePosition = new Point(campArea.x + campArea.width / 2, campArea.y + campArea.height - 10);
+        if (safeHub) {
+            buildCamp();
+            keepClear.add(new Rectangle(campArea.x + T, campArea.y + 3 * T, campArea.width - 2 * T, campArea.height - 3 * T));
+            switch (type) {
+                case WASTELAND_HIGHWAY: buildHighway(); break;
+                case SURVIVOR_CAMP: buildSurvivorCamp(); break;
+                case ABANDONED_BUNKER: buildBunker(); break;
+                case GAS_STATION: buildGasStation(); break;
+                default: buildQuarantine(); break;
+            }
+        } else {
+            buildProceduralChamber();
         }
         renderGround();
         computeWalkable();
@@ -375,6 +387,10 @@ public final class GameMap {
     }
 
     // ------------------------------------------------------------------ public API
+    public String getChamberLayoutName() {
+        return chamberLayoutName;
+    }
+
     public GameData.MapType getType() {
         return type;
     }
@@ -460,6 +476,37 @@ public final class GameMap {
     /** World coordinates of the camp trader/workshop NPC. */
     public Point getTraderPosition() {
         return traderPosition != null ? new Point(traderPosition) : new Point(playerSpawn);
+    }
+
+    /** True if this map hosts the Safe Camp Hub (false in procedural combat chambers). */
+    public boolean hasSafeCamp() {
+        return safeHub;
+    }
+
+    /** Expedition Gate location at the Safe Camp entrance. */
+    public Point getGatePosition() {
+        return gatePosition != null ? new Point(gatePosition) : new Point(playerSpawn);
+    }
+
+    /** Random reachable walkable tile at least minDist pixels away from (fromX, fromY). */
+    public Point randomWalkablePoint(Random random, double fromX, double fromY, double minDist) {
+        for (int tries = 0; tries < 90; tries++) {
+            int col = 3 + random.nextInt(COLS - 6);
+            int row = 3 + random.nextInt(ROWS - 6);
+            if (!isWalkableTile(col, row) || (reachable != null && !reachable[row][col])) {
+                continue;
+            }
+            double px = col * T + T / 2.0;
+            double py = row * T + T / 2.0;
+            if (Math.hypot(px - fromX, py - fromY) < minDist) {
+                continue;
+            }
+            Rectangle probe = new Rectangle((int) px - 12, (int) py - 10, 24, 20);
+            if (!isBlocked(probe)) {
+                return new Point((int) px, (int) py);
+            }
+        }
+        return new Point(spawnPoints.get(random.nextInt(spawnPoints.size())));
     }
 
     /** Active automated guard post positions around the camp. */
@@ -939,6 +986,453 @@ public final class GameMap {
                 }
             }
         }
+    }
+
+    private void buildProceduralChamber() {
+        int padC = 1 + rng.nextInt(4);
+        int padR = 1 + rng.nextInt(3);
+        int minC = padC, maxC = COLS - 1 - padC;
+        int minR = Math.max(2, padR), maxR = ROWS - 1 - padR;
+
+        wallRect(0, 0, COLS, minR);
+        wallRect(0, maxR + 1, COLS, ROWS - (maxR + 1));
+        wallRect(0, 0, minC, ROWS);
+        wallRect(maxC + 1, 0, COLS - (maxC + 1), ROWS);
+
+        if (rng.nextBoolean()) {
+            int cut = 3 + rng.nextInt(3);
+            for (int d = 0; d < cut; d++) {
+                for (int k = 0; k < cut - d; k++) {
+                    setWallSafe(minC + k, minR + d, true);
+                    setWallSafe(maxC - k, minR + d, true);
+                    setWallSafe(minC + k, maxR - d, true);
+                    setWallSafe(maxC - k, maxR - d, true);
+                }
+            }
+        }
+
+        int midC = (minC + maxC) / 2;
+        int midR = (minR + maxR) / 2;
+        int offR = (rng.nextInt(3) - 1) * 4;
+        int offC = (rng.nextInt(3) - 1) * 6;
+        int dir = rng.nextInt(8);
+        int sc, sr, gc, gr;
+        switch (dir) {
+            case 0: // West -> East
+                sc = minC + 4; sr = clampInt(midR + offR, minR + 5, maxR - 5);
+                gc = maxC - 4; gr = clampInt(midR - offR, minR + 5, maxR - 5);
+                break;
+            case 1: // East -> West
+                sc = maxC - 4; sr = clampInt(midR + offR, minR + 5, maxR - 5);
+                gc = minC + 4; gr = clampInt(midR - offR, minR + 5, maxR - 5);
+                break;
+            case 2: // South -> North
+                sc = clampInt(midC + offC, minC + 6, maxC - 6); sr = maxR - 4;
+                gc = clampInt(midC - offC, minC + 6, maxC - 6); gr = minR + 4;
+                break;
+            case 3: // North -> South
+                sc = clampInt(midC + offC, minC + 6, maxC - 6); sr = minR + 4;
+                gc = clampInt(midC - offC, minC + 6, maxC - 6); gr = maxR - 4;
+                break;
+            case 4: // North-West -> South-East
+                sc = minC + 5; sr = minR + 4;
+                gc = maxC - 5; gr = maxR - 4;
+                break;
+            case 5: // South-East -> North-West
+                sc = maxC - 5; sr = maxR - 4;
+                gc = minC + 5; gr = minR + 4;
+                break;
+            case 6: // South-West -> North-East
+                sc = minC + 5; sr = maxR - 4;
+                gc = maxC - 5; gr = minR + 4;
+                break;
+            default: // North-East -> South-West
+                sc = maxC - 5; sr = minR + 4;
+                gc = minC + 5; gr = maxR - 4;
+                break;
+        }
+        int tc = clampInt(sc + (sc < midC ? 4 : -4), minC + 5, maxC - 5);
+        int tr = clampInt(sr + (sr < midR ? 3 : -3), minR + 5, maxR - 4);
+        if (Math.abs(tc - gc) <= 4 && Math.abs(tr - gr) <= 4) {
+            tc = midC;
+            tr = midR;
+        }
+
+        playerSpawn = new Point(sc * T + T / 2, sr * T + T / 2);
+        gatePosition = new Point(gc * T + T / 2, gr * T + T / 2);
+        traderPosition = new Point(tc * T + T / 2, tr * T + T / 2);
+        campArea = new Rectangle(playerSpawn.x - 3 * T, playerSpawn.y - 3 * T, 6 * T, 6 * T);
+        reserve(sc - 2, sr - 2, 5, 5);
+        reserve(gc - 2, gr - 2, 5, 5);
+        Rectangle traderPlaza = new Rectangle((tc - 2) * T, (tr - 2) * T, 5 * T, 4 * T);
+        keepClear.add(traderPlaza);
+
+        int layout = rng.nextInt(12);
+        switch (layout) {
+            case 0:
+                chamberLayoutName = "HIGHWAY AMBUSH";
+                buildProceduralHighway(minC, minR, maxC, maxR, sc, sr, gc, gr);
+                break;
+            case 1:
+                chamberLayoutName = "BUNKER LABYRINTH";
+                buildProceduralLabyrinth(minC, minR, maxC, maxR);
+                break;
+            case 2:
+                chamberLayoutName = "TWIN BRIDGES";
+                buildProceduralTwinBridges(minC, minR, maxC, maxR, dir);
+                break;
+            case 3:
+                chamberLayoutName = "PILLAR COLOSSEUM";
+                buildProceduralColosseum(minC, minR, maxC, maxR, midC, midR);
+                break;
+            case 4:
+                chamberLayoutName = "SHANTY ALLEYS";
+                buildProceduralShanty(minC, minR, maxC, maxR);
+                break;
+            case 5:
+                chamberLayoutName = "REACTOR CORE";
+                buildProceduralReactor(minC, minR, maxC, maxR, midC, midR);
+                break;
+            case 6:
+                chamberLayoutName = "SERPENTINE GAUNTLET";
+                buildProceduralSerpentine(minC, minR, maxC, maxR);
+                break;
+            case 7:
+                chamberLayoutName = "QUARANTINE CELLS";
+                buildProceduralQuarantine(minC, minR, maxC, maxR, midC, midR);
+                break;
+            case 8:
+                chamberLayoutName = "CROSSROAD CITADEL";
+                buildProceduralCitadel(minC, minR, maxC, maxR, midC, midR);
+                break;
+            case 9:
+                chamberLayoutName = "SUNKEN COURTYARD";
+                buildProceduralCourtyard(minC, minR, maxC, maxR, midC, midR);
+                break;
+            case 10:
+                chamberLayoutName = "SPLIT FOUNDRY";
+                buildProceduralFoundry(minC, minR, maxC, maxR, midC, midR);
+                break;
+            default:
+                chamberLayoutName = "CATACOMB RINGS";
+                buildProceduralCatacombs(minC, minR, maxC, maxR, midC, midR);
+                break;
+        }
+        ensureChamberConnectivity(sc, sr, gc, gr, midC, midR, tc, tr);
+        keepClear.remove(traderPlaza);
+        paint(DIRT, tc - 2, tr - 2, 5, 4);
+        putTile(NPC_TRADER, tc, tr - 1);
+        putTile(TABLE_TRADE, tc - 1, tr - 1);
+        putTile(BOX_SUPPLY, tc + 1, tr - 1);
+    }
+
+    private void buildProceduralHighway(int minC, int minR, int maxC, int maxR, int sc, int sr, int gc, int gr) {
+        paint(type == GameData.MapType.ABANDONED_BUNKER ? FLOOR : SAND, minC, minR, maxC - minC + 1, maxR - minR + 1);
+        int midR = (sr + gr) / 2;
+        int midC = (sc + gc) / 2;
+        paint(DIRT, minC, Math.max(minR, midR - 2), maxC - minC + 1, 5);
+        paint(DIRT, Math.max(minC, midC - 2), minR, 5, maxR - minR + 1);
+        roadLine(minC, maxC, midR * T + 12, false);
+        roadLine(minR, maxR, midC * T + 12, true);
+        PropDef[] roadWrecks = {CAR_RED_H, CAR_BURNT_H, VAN_BURNT_H, VAN_BLUE_H, CAR_BLUE_V, CAR_BURNT_V};
+        scatter(roadWrecks, minC + 3, minR + 3, maxC - minC - 6, maxR - minR - 6, 8 + rng.nextInt(5), 45);
+        PropDef[] clutter = {BARREL_RED, BARREL_ORANGE, TIRES, CRATE_METAL, CRATE_WOOD, STOP_SIGN};
+        scatter(clutter, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 14 + rng.nextInt(6), 60);
+    }
+
+    private void buildProceduralLabyrinth(int minC, int minR, int maxC, int maxR) {
+        paint(FLOOR, minC, minR, maxC - minC + 1, maxR - minR + 1);
+        int spanC = maxC - minC + 1;
+        int spanR = maxR - minR + 1;
+        int divCount = 2 + rng.nextInt(2);
+        for (int i = 1; i <= divCount; i++) {
+            int wc = minC + i * spanC / (divCount + 1);
+            wallRect(wc, minR + 2, 1, spanR - 4);
+            int gapA = minR + 3 + rng.nextInt(Math.max(2, spanR / 2 - 4));
+            int gapB = minR + spanR / 2 + rng.nextInt(Math.max(2, spanR / 2 - 5));
+            clearWallRect(wc, gapA, 1, 4);
+            clearWallRect(wc, gapB, 1, 4);
+        }
+        if (rng.nextBoolean()) {
+            int wr = minR + spanR / 2;
+            wallRect(minC + 4, wr, spanC - 8, 1);
+            clearWallRect(minC + spanC / 3, wr, 4, 1);
+            clearWallRect(minC + 2 * spanC / 3 - 2, wr, 4, 1);
+        }
+        PropDef[] furniture = {LOCKER_PAIR, DESK_H, TABLE_MED, BARREL_RED, CRATE_METAL, BOX_SUPPLY};
+        scatter(furniture, minC + 2, minR + 2, spanC - 4, spanR - 4, 14 + rng.nextInt(6), 60);
+    }
+
+    private void buildProceduralTwinBridges(int minC, int minR, int maxC, int maxR, int dir) {
+        paint(DIRT, minC, minR, maxC - minC + 1, maxR - minR + 1);
+        int midC = (minC + maxC) / 2;
+        int midR = (minR + maxR) / 2;
+        if (dir < 2) {
+            wallRect(midC - 1, minR, 3, maxR - minR + 1);
+            int br1 = minR + 4 + rng.nextInt(4);
+            int br2 = maxR - 7 - rng.nextInt(4);
+            clearWallRect(midC - 1, br1, 3, 4);
+            clearWallRect(midC - 1, br2, 3, 4);
+            paint(FLOOR, midC - 2, br1, 5, 4);
+            paint(FLOOR, midC - 2, br2, 5, 4);
+        } else {
+            wallRect(minC, midR - 1, maxC - minC + 1, 3);
+            int br1 = minC + 6 + rng.nextInt(6);
+            int br2 = maxC - 10 - rng.nextInt(6);
+            clearWallRect(br1, midR - 1, 4, 3);
+            clearWallRect(br2, midR - 1, 4, 3);
+            paint(FLOOR, br1, midR - 2, 4, 5);
+            paint(FLOOR, br2, midR - 2, 4, 5);
+        }
+        PropDef[] cover = {FENCE_BROKEN_A, BARREL_ORANGE, CRATE_WOOD, TIRES, SIGN_DANGER, BOX_PILE};
+        scatter(cover, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 14, 55);
+    }
+
+    private void buildProceduralColosseum(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        paint(SAND, minC, minR, maxC - minC + 1, maxR - minR + 1);
+        paint(DIRT, midC - 10, midR - 6, 20, 12);
+        int numPillars = 6 + rng.nextInt(3);
+        for (int i = 0; i < numPillars; i++) {
+            double ang = i * (2 * Math.PI / numPillars) + 0.3;
+            int pc = clampInt((int) Math.round(midC + Math.cos(ang) * (8 + (i % 2) * 5)), minC + 4, maxC - 6);
+            int pr = clampInt((int) Math.round(midR + Math.sin(ang) * (5 + (i % 2) * 3)), minR + 4, maxR - 6);
+            wallRect(pc, pr, 2, 2);
+        }
+        putTile(FLAME_BARREL, midC, midR);
+        PropDef[] arena = {CRATE_STACK, METAL_STACK, BARREL_RED, TIRES, BOX_PILE};
+        scatter(arena, minC + 3, minR + 3, maxC - minC - 6, maxR - minR - 6, 12, 48);
+    }
+
+    private void buildProceduralShanty(int minC, int minR, int maxC, int maxR) {
+        paint(DIRT, minC, minR, maxC - minC + 1, maxR - minR + 1);
+        paint(FLOOR, minC + 3, minR + 3, maxC - minC - 6, maxR - minR - 6);
+        int blocks = 3 + rng.nextInt(3);
+        for (int i = 0; i < blocks; i++) {
+            int bc = minC + 6 + rng.nextInt(Math.max(4, maxC - minC - 14));
+            int br = minR + 4 + rng.nextInt(Math.max(4, maxR - minR - 10));
+            wallRect(bc, br, 3 + rng.nextInt(3), 2 + rng.nextInt(2));
+        }
+        PropDef[] shanty = {SHED, STALL_A, STALL_B, TENT_GREEN_FLAT, WATER_TOWER, CRATE_CLUSTER, BARREL_STACK};
+        scatter(shanty, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 14, 60);
+    }
+
+    private void buildProceduralReactor(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        paint(FLOOR, minC, minR, maxC - minC + 1, maxR - minR + 1);
+        wallRect(midC - 2, midR - 2, 4, 4);
+        wallRect(midC - 9, midR, 5, 1);
+        wallRect(midC + 5, midR, 5, 1);
+        wallRect(midC, midR - 7, 1, 3);
+        wallRect(midC, midR + 5, 1, 3);
+        putTile(SIGN_TOXIC, midC - 3, midR - 2);
+        putTile(SIGN_ELECTRIC, midC + 2, midR + 2);
+        PropDef[] lab = {GAS_TANK, BARREL_STACK, CRATE_METAL, DESK_LAB_V, VENDING_RED, BOX_SUPPLY};
+        scatter(lab, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 16, 65);
+    }
+
+    private void buildProceduralSerpentine(int minC, int minR, int maxC, int maxR) {
+        int h = maxR - minR + 1;
+        int w = maxC - minC + 1;
+        paint(DIRT, minC + 1, minR + 1, w - 2, h - 2);
+        int segs = 4;
+        int stepC = Math.max(8, (w - 8) / segs);
+        for (int i = 1; i < segs; i++) {
+            int c = minC + 3 + i * stepC;
+            if (c >= maxC - 5) {
+                break;
+            }
+            if ((i & 1) == 1) {
+                wallRect(c, minR + 2, 2, Math.max(4, h - 10));
+            } else {
+                wallRect(c, minR + 8, 2, Math.max(4, h - 10));
+            }
+            int breachR = clampInt(minR + 4 + rng.nextInt(Math.max(3, h - 9)), minR + 3, maxR - 5);
+            clearWallRect(c, breachR, 2, 3);
+        }
+        paint(SAND, minC + 4, minR + 3, w - 8, h - 6);
+        PropDef[] cover = {CRATE_STACK, CRATE_METAL, BARREL_RED, BARREL_OIL, TIRES};
+        scatter(cover, minC + 2, minR + 2, w - 4, h - 4, 24, 90);
+        putTile(SIGN_DANGER, minC + 5, minR + 3);
+        putTile(SIGN_WARNING, maxC - 5, maxR - 3);
+    }
+
+    private void buildProceduralQuarantine(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        paint(DIRT, minC + 2, midR - 2, maxC - minC - 4, 5);
+        int cellW = 10;
+        int cellH = 8;
+        int colsStart = minC + 5;
+        for (int c = colsStart; c + cellW <= maxC - 4; c += cellW + 3) {
+            int topR = minR + 3;
+            wallRect(c, topR, cellW, 2);
+            wallRect(c, topR, 2, cellH);
+            wallRect(c + cellW - 2, topR, 2, cellH);
+            wallRect(c, topR + cellH - 1, cellW / 2 - 1, 1);
+            wallRect(c + cellW / 2 + 2, topR + cellH - 1, cellW - (cellW / 2 + 2), 1);
+            putTile(TABLE_MED, c + 3, topR + 3);
+            putTile(LOCKER_PAIR, c + cellW - 4, topR + 3);
+
+            int botR = maxR - 2 - cellH;
+            if (botR > topR + cellH + 3) {
+                wallRect(c, botR + cellH - 1, cellW, 2);
+                wallRect(c, botR, 2, cellH);
+                wallRect(c + cellW - 2, botR, 2, cellH);
+                wallRect(c, botR, cellW / 2 - 1, 1);
+                wallRect(c + cellW / 2 + 2, botR, cellW - (cellW / 2 + 2), 1);
+                putTile(DESK_LAB_V, c + 3, botR + 3);
+                putTile(BARREL_ORANGE, c + cellW - 4, botR + 4);
+            }
+        }
+        putTile(SIGN_TOXIC, midC - 2, midR);
+        PropDef[] cover = {BARREL_ORANGE, CRATE_WOOD, TABLE_WORK, BOX_SUPPLY};
+        scatter(cover, minC + 3, midR - 2, maxC - minC - 6, 5, 10, 45);
+    }
+
+    private void buildProceduralCitadel(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        paint(SAND, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4);
+        paint(DIRT, midC - 6, minR + 2, 12, maxR - minR - 4);
+        paint(DIRT, minC + 2, midR - 4, maxC - minC - 4, 8);
+        int rw = 14, rh = 10;
+        int x0 = midC - rw / 2, y0 = midR - rh / 2;
+        wallRect(x0, y0, rw, 2);
+        wallRect(x0, y0 + rh - 2, rw, 2);
+        wallRect(x0, y0, 2, rh);
+        wallRect(x0 + rw - 2, y0, 2, rh);
+        clearWallRect(midC - 2, y0, 4, 2);
+        clearWallRect(midC - 2, y0 + rh - 2, 4, 2);
+        clearWallRect(x0, midR - 2, 2, 4);
+        clearWallRect(x0 + rw - 2, midR - 2, 2, 4);
+
+        putTile(BOX_AMMO, midC - 2, midR - 1);
+        putTile(SHED, midC + 2, midR - 1);
+        putTile(FENCE_BROKEN_A, x0 - 4, midR - 3);
+        putTile(FENCE_BROKEN_B, x0 + rw + 3, midR + 2);
+        putTile(STOP_SIGN, midC - 4, y0 - 2);
+        putTile(SIGN_KEEP_OUT, midC + 3, y0 + rh + 2);
+        PropDef[] fort = {CRATE_CLUSTER, BARREL_STACK, CAR_BURNT_H, TIRES, METAL_STACK};
+        scatter(fort, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 20, 80);
+    }
+
+    private void buildProceduralCourtyard(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        paint(SAND, midC - 11, midR - 7, 22, 14);
+        int bw = 8, bh = 5;
+        wallRect(minC + 5, minR + 4, bw, bh);
+        wallRect(maxC - 5 - bw, minR + 4, bw, bh);
+        wallRect(minC + 5, maxR - 4 - bh, bw, bh);
+        wallRect(maxC - 5 - bw, maxR - 4 - bh, bw, bh);
+        clearWallRect(minC + 8, minR + 4 + bh - 2, 2, 2);
+        clearWallRect(maxC - 9, maxR - 4 - bh, 2, 2);
+
+        putTile(WATER_TOWER, midC, midR - 2);
+        putTile(FLAME_BARREL, midC - 3, midR + 1);
+        putTile(FLAME_BARREL, midC + 3, midR + 1);
+        putTile(STALL_A, midC - 7, midR - 4);
+        putTile(STALL_B, midC + 6, midR + 3);
+        putLeft(CAR_BURNT_H, clampInt(midC - 6, minC + 2, maxC - 6), clampInt(midR + 4, minR + 3, maxR - 3));
+        putLeft(VAN_BURNT_H, clampInt(midC + 2, minC + 2, maxC - 6), clampInt(midR - 5, minR + 3, maxR - 3));
+        PropDef[] yard = {CRATE_WOOD, BARREL_RED, TIRES, BOX_PILE, CAR_RED_H};
+        scatter(yard, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 20, 80);
+    }
+
+    private void buildProceduralFoundry(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        paint(DIRT, minC + 1, minR + 1, maxC - minC - 2, maxR - minR - 2);
+        wallRect(midC - 1, minR + 2, 2, maxR - minR - 4);
+        clearWallRect(midC - 1, minR + 5, 2, 4);
+        clearWallRect(midC - 1, midR - 2, 2, 4);
+        clearWallRect(midC - 1, maxR - 8, 2, 4);
+        paint(SAND, midC - 5, midR - 3, 10, 6);
+
+        putTile(PIPE_STACK, midC - 7, midR - 4);
+        putTile(PIPE_STACK, midC + 6, midR + 3);
+        putTile(WATER_TANK_H, minC + 8, midR - 1);
+        putTile(GAS_TANK, maxC - 8, midR);
+        putTile(SIGN_ELECTRIC, midC - 3, minR + 4);
+        putTile(SIGN_DANGER, midC + 3, maxR - 4);
+        PropDef[] foundry = {METAL_STACK, CRATE_METAL, CRATE_CLUSTER, BARREL_OIL, BARREL_STACK};
+        scatter(foundry, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 24, 90);
+    }
+
+    private void buildProceduralCatacombs(int minC, int minR, int maxC, int maxR, int midC, int midR) {
+        int outW = Math.min(30, maxC - minC - 10);
+        int outH = Math.min(20, maxR - minR - 6);
+        int ox = midC - outW / 2;
+        int oy = midR - outH / 2;
+        if (outW >= 18 && outH >= 12) {
+            wallRect(ox, oy, outW, 2);
+            wallRect(ox, oy + outH - 2, outW, 2);
+            wallRect(ox, oy, 2, outH);
+            wallRect(ox + outW - 2, oy, 2, outH);
+            clearWallRect(midC - 2, oy, 4, 2);
+            clearWallRect(midC - 2, oy + outH - 2, 4, 2);
+            clearWallRect(ox, midR - 2, 2, 4);
+            clearWallRect(ox + outW - 2, midR - 2, 2, 4);
+        }
+        int inW = 10, inH = 6;
+        int ix = midC - inW / 2, iy = midR - inH / 2;
+        wallRect(ix, iy, inW, 1);
+        wallRect(ix, iy + inH - 1, inW, 1);
+        wallRect(ix, iy, 1, inH);
+        wallRect(ix + inW - 1, iy, 1, inH);
+        clearWallRect(midC - 1, iy, 3, 1);
+        clearWallRect(midC - 1, iy + inH - 1, 3, 1);
+        clearWallRect(ix, midR - 1, 1, 2);
+        clearWallRect(ix + inW - 1, midR - 1, 1, 2);
+
+        putTile(VENDING_RED, midC - 2, midR);
+        putTile(TENT_GREEN_FLAT, midC + 2, midR);
+        putTile(DESK_H, ox + 4, oy + 3);
+        putTile(CRATE_STACK, ox + outW - 5, oy + outH - 4);
+        PropDef[] crypt = {CRATE_WOOD, BOX_PILE, BARREL_RED, BARREL_ORANGE, CAR_BLUE_V};
+        scatter(crypt, minC + 2, minR + 2, maxC - minC - 4, maxR - minR - 4, 18, 70);
+    }
+
+    private void ensureChamberConnectivity(int sc, int sr, int gc, int gr, int midC, int midR, int tc, int tr) {
+        clearWallRect(sc - 2, sr - 2, 5, 5);
+        clearWallRect(gc - 2, gr - 2, 5, 5);
+        clearWallRect(tc - 2, tr - 2, 5, 4);
+        carveCorridor(sc, sr, tc, tr);
+
+        int wp1C = clampInt(midC + (rng.nextInt(3) - 1) * 4, 5, COLS - 6);
+        int wp1R = clampInt(minR_safe(midR - 5), 5, ROWS - 6);
+        int wp2C = clampInt(midC + (rng.nextInt(3) - 1) * 4, 5, COLS - 6);
+        int wp2R = clampInt(minR_safe(midR + 5), 5, ROWS - 6);
+        carveCorridor(sc, sr, wp1C, wp1R);
+        carveCorridor(wp1C, wp1R, gc, gr);
+        carveCorridor(tc, tr, wp2C, wp2R);
+        carveCorridor(wp2C, wp2R, gc, gr);
+    }
+
+    private int minR_safe(int r) {
+        return clampInt(r, 4, ROWS - 5);
+    }
+
+    private void carveCorridor(int c0, int r0, int c1, int r1) {
+        int c = c0, r = r0;
+        while (c != c1) {
+            clearWallRect(c - 1, r - 1, 3, 3);
+            c += Integer.compare(c1, c);
+        }
+        while (r != r1) {
+            clearWallRect(c - 1, r - 1, 3, 3);
+            r += Integer.compare(r1, r);
+        }
+        clearWallRect(c1 - 1, r1 - 1, 3, 3);
+    }
+
+    private void clearWallRect(int col, int row, int w, int h) {
+        for (int r = row; r < row + h; r++) {
+            for (int c = col; c < col + w; c++) {
+                setWallSafe(c, r, false);
+            }
+        }
+    }
+
+    private void setWallSafe(int c, int r, boolean val) {
+        if (r >= 0 && r < ROWS && c >= 0 && c < COLS) {
+            wall[r][c] = val;
+        }
+    }
+
+    private static int clampInt(int v, int lo, int hi) {
+        return Math.max(lo, Math.min(hi, v));
     }
 
     // ------------------------------------------------------------------ the camp (same idea on every map)
@@ -1895,14 +2389,29 @@ public final class GameMap {
     private void findSpawnPoints() {
         int[][] fromCamp = new int[ROWS][COLS];
         fillDistances(fromCamp, playerSpawn.x / T, playerSpawn.y / T);
+        reachable = new boolean[ROWS][COLS];
+        for (int r = 0; r < ROWS; r++) {
+            for (int c = 0; c < COLS; c++) {
+                reachable[r][c] = fromCamp[r][c] != FAR;
+            }
+        }
         GameData.MonsterType big = GameData.MonsterType.ZOMBIE_BOSS;
         for (int r = 1; r < ROWS - 1; r++) {
             for (int c = 1; c < COLS - 1; c++) {
-                boolean nearEdge = r <= 3 || c <= 3 || r >= ROWS - 4 || c >= COLS - 4;
-                if (!nearEdge || fromCamp[r][c] == FAR) {
+                if (fromCamp[r][c] == FAR) {
                     continue;
                 }
                 Point p = new Point(c * T + T / 2, r * T + 8);
+                if (safeHub) {
+                    boolean nearEdge = r <= 3 || c <= 3 || r >= ROWS - 4 || c >= COLS - 4;
+                    if (!nearEdge) {
+                        continue;
+                    }
+                } else {
+                    if (Math.hypot(p.x - playerSpawn.x, p.y - playerSpawn.y) < 175.0) {
+                        continue;
+                    }
+                }
                 // feet boxes exactly as Entity.getFeetBounds() will compute them
                 Rectangle bossFeet = new Rectangle(p.x - big.hitboxW / 2, p.y + big.hitboxH / 2 - 8, big.hitboxW, 8);
                 Rectangle smallFeet = new Rectangle(p.x - 7, p.y + 1, 14, 8);

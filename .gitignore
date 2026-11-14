@@ -4,6 +4,7 @@
 
 # build output
 target/
+dist/
 
 # runtime score file written by the game
 highscores.txt
