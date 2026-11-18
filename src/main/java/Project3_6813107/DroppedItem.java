@@ -91,18 +91,25 @@ public final class DroppedItem extends Entity {
             alive = false;
             return;
         }
+        updateMagnet();
+    }
+
+    /** Accelerates towards the collector in a straight line so loot cannot get stuck on walls. */
+    private void updateMagnet() {
         if (collector == null || !collector.isAlive()) {
             return;
         }
         double dist = distanceTo(collector);
-        if (flying || (age > 8 && dist < collector.getPickupRadius())) {
-            // magnet: accelerate towards the player; ignores walls so items never get stuck
-            flying = true;
-            flyTicks++;
-            double pull = Math.min(dist, Math.min(11.5, 2.8 + flyTicks * 0.45));
-            x += (collector.getX() - x) / Math.max(1, dist) * pull;
-            y += (collector.getY() - y) / Math.max(1, dist) * pull;
+        boolean attracted = flying || (age > 8 && dist < collector.getPickupRadius());
+        if (!attracted) {
+            return;
         }
+        flying = true;
+        flyTicks++;
+        double pull = Math.min(dist, Math.min(11.5, 2.8 + flyTicks * 0.45));
+        double distance = Math.max(1, dist);
+        x += (collector.getX() - x) / distance * pull;
+        y += (collector.getY() - y) / distance * pull;
     }
 
     private void updateChest() {

@@ -8,15 +8,11 @@ import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Composite;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
-import java.awt.MultipleGradientPaint;
 import java.awt.Point;
-import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
-import java.awt.RenderingHints;
 import java.awt.Stroke;
 import java.awt.Toolkit;
 import java.awt.event.FocusAdapter;
@@ -29,7 +25,6 @@ import java.awt.event.MouseMotionListener;
 import java.awt.event.MouseWheelEvent;
 import java.awt.event.MouseWheelListener;
 import java.awt.geom.AffineTransform;
-import java.awt.geom.Arc2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
@@ -76,10 +71,6 @@ public final class GamePanel extends JPanel
     private static final Color TEXT_LOOT = new Color(0xB4DC70);   // light green from the kit's infection bar
     private static final Color BANNER_WAVE = Theme.GOLD;
     private static final Color BANNER_BOSS = Theme.RED;
-    private static final Color GLASS = new Color(14, 16, 20, 215);   // dark see-through panels over the world
-    private static final Color SCRIM = new Color(8, 9, 12, 165);     // darkens the world behind pause / end screens
-    // overlay text uses the kit's pixel font (Theme.drawPixelText); this font is for the pause card's sentences
-    private static final Font FONT_HELP = Theme.font(Font.PLAIN, 14);
 
     // ------------------------------------------------------------------ world
     // transient: Swing panels are Serializable, but a running game is never written to a stream
@@ -108,7 +99,6 @@ public final class GamePanel extends JPanel
     private volatile boolean won;
     private volatile int tickCount;            // every update step, also after game over (animations)
     private volatile int elapsedTicks;         // active chamber run time
-    private volatile int wave = 1;
     private volatile int chamber;              // 0 = Safe Camp Hub, 1..15 = Act 1-3, 16+ = Endless
     private volatile int highestChamberReached;
     private volatile int runNumber = 1;
@@ -123,7 +113,6 @@ public final class GamePanel extends JPanel
     private int gameOverTimer;
     private boolean raidActive;
     private float nightAlpha;                  // atmospheric darkness by Act / Boss depth
-    private transient BufferedImage nightMask; // world-scale darkness layer punched with light pools
     private int idlePlayerTicks;
     private double lastPlayerX, lastPlayerY;
     private transient volatile Banner banner;
@@ -278,7 +267,7 @@ public final class GamePanel extends JPanel
     private final transient List<GameMap.Drawable> drawList = new ArrayList<>();
     private final transient BufferedImage[] explosionFrames = AssetLoader.getExplosionFrames();
     private final transient BufferedImage[] impactFrames = AssetLoader.getImpactFrames();
-    private transient BufferedImage vignette;            // red edge for low health, rebuilt only when the size changes
+    private final transient GameOverlay overlay;
     private int originX, originY;              // screen pixel of world (0, 0) in the frame being painted
 
     // ------------------------------------------------------------------ small helper types
@@ -322,7 +311,7 @@ public final class GamePanel extends JPanel
     }
 
     /** Environmental chamber traps (damage both player and monsters). */
-    private static final class HazardTrap implements GameMap.Drawable {
+    static final class HazardTrap implements GameMap.Drawable {
         enum TrapKind { SPIKE, TOXIC, SHOCK, MINE, FLAME_JET }
 
         final TrapKind kind;
@@ -487,7 +476,7 @@ public final class GamePanel extends JPanel
     }
 
     /** Hades-style Exit Portal / Gate leading to the next chosen chamber or Safe Camp Hub. */
-    private static final class ExitDoor implements GameMap.Drawable {
+    static final class ExitDoor implements GameMap.Drawable {
         final GameData.ChamberType type;
         final int nextChamber;
         final double x, y;
@@ -543,7 +532,7 @@ public final class GamePanel extends JPanel
     }
 
     /** Armed NPC survivor who accompanies the player, keeps formation, and shoots nearby zombies. */
-    private final class AllyNpc implements GameMap.Drawable {
+    final class AllyNpc implements GameMap.Drawable {
         final int slot;
         double x, y;
         double aimAngle;
@@ -678,6 +667,7 @@ public final class GamePanel extends JPanel
         solidRects = new ArrayList<>(map.getSolidRects());
         Point spawn = map.getPlayerSpawn();
         player = new Player(this.settings, spawn.x, spawn.y);
+        overlay = new GameOverlay(player, monsters, drops, allies, traps, exitDoors, this::getHostilesRemaining);
         player.setMap(map);
         player.pushOutOfWalls();
         player.prepareForSafeCamp(false);
@@ -727,22 +717,10 @@ public final class GamePanel extends JPanel
         raidActive = false;
         nightAlpha = 0f;
 
-        map = new GameMap(hubType, hubType.seed, true);
-        solidRects.clear();
-        solidRects.addAll(map.getSolidRects());
-        Point spawn = map.getPlayerSpawn();
-        player.setMap(map);
-        player.setPosition(spawn.x, spawn.y);
-        player.pushOutOfWalls();
+        Point spawn = placePlayerOnMap(new GameMap(hubType, hubType.seed, true));
         player.prepareForSafeCamp(false);
 
-        monsters.clear();
-        bullets.clear();
-        drops.clear();
-        traps.clear();
-        exitDoors.clear();
-        effects.clear();
-        allies.clear();
+        clearRoomEntities();
         int allyLv = player.getLevel(GameData.RecipeKind.BASE_TURRET);
         for (int i = 0; i < Math.min(4, allyLv); i++) {
             allies.add(new AllyNpc(i, spawn.x - 24 + i * 16, spawn.y + 12));
@@ -817,7 +795,6 @@ public final class GamePanel extends JPanel
             runSeed += 313L;
         }
         chamber = nextChamber;
-        wave = nextChamber;
         highestChamberReached = Math.max(highestChamberReached, chamber);
         currentChamberType = type;
         chamberCleared = false;
@@ -827,14 +804,7 @@ public final class GamePanel extends JPanel
         nightAlpha = chamber >= 11 ? 0.42f : (chamber >= 6 ? 0.24f : (type == GameData.ChamberType.BOSS_CHAMBER ? 0.35f : 0f));
 
         GameData.MapType biome = biomeForChamber(chamber);
-        map = new GameMap(biome, runSeed + chamber * 7919L + runNumber * 131L, false);
-        solidRects.clear();
-        solidRects.addAll(map.getSolidRects());
-
-        Point spawn = map.getPlayerSpawn();
-        player.setMap(map);
-        player.setPosition(spawn.x, spawn.y);
-        player.pushOutOfWalls();
+        Point spawn = placePlayerOnMap(new GameMap(biome, runSeed + chamber * 7919L + runNumber * 131L, false));
         player.clearTempChamberWeapon();
         rollFieldShopOffers(chamber);
         if (!player.canUseWeaponInRun(player.getCurrentWeapon(), false)) {
@@ -842,14 +812,7 @@ public final class GamePanel extends JPanel
             player.switchWeapon(gun != null ? gun : GameData.WeaponType.KNIFE);
         }
 
-        monsters.clear();
-        bullets.clear();
-        drops.clear();
-        traps.clear();
-        exitDoors.clear();
-        effects.clear();
-
-        allies.clear();
+        clearRoomEntities();
         int allyLv = player.getLevel(GameData.RecipeKind.BASE_TURRET);
         for (int i = 0; i < Math.min(4, allyLv); i++) {
             allies.add(new AllyNpc(i, spawn.x - 22 + i * 14, spawn.y + 12));
@@ -884,6 +847,27 @@ public final class GamePanel extends JPanel
         lastPlayerY = player.getY();
         updateCamera(1.0);
         requestHudRefresh();
+    }
+
+    private Point placePlayerOnMap(GameMap nextMap) {
+        map = nextMap;
+        solidRects.clear();
+        solidRects.addAll(map.getSolidRects());
+        Point spawn = map.getPlayerSpawn();
+        player.setMap(map);
+        player.setPosition(spawn.x, spawn.y);
+        player.pushOutOfWalls();
+        return spawn;
+    }
+
+    private void clearRoomEntities() {
+        monsters.clear();
+        bullets.clear();
+        drops.clear();
+        traps.clear();
+        exitDoors.clear();
+        effects.clear();
+        allies.clear();
     }
 
     private void spawnTrapsForChamber(int c, GameData.ChamberType kind, Point spawn) {
@@ -1191,7 +1175,6 @@ public final class GamePanel extends JPanel
             return;
         }
         elapsedTicks++;
-        wave = chamber;
     }
 
     /** Updates environmental hazards; active traps injure both survivors (unless dashing) and monsters. */
@@ -2222,10 +2205,6 @@ public final class GamePanel extends JPanel
         return new Rectangle((int) camX, (int) camY, getViewWidth() / SCALE + 1, getViewHeight() / SCALE + 1);
     }
 
-    private static String formatTime(int seconds) {
-        return String.format("%d:%02d", seconds / 60, seconds % 60);
-    }
-
     // ------------------------------------------------------------------ input handlers
     /** WASD/arrows move, 1-8 pick a weapon, G grenade, E medkit, B workshop, P/Esc pause. */
     @Override
@@ -2394,10 +2373,8 @@ public final class GamePanel extends JPanel
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
-        Graphics2D g2 = (Graphics2D) g.create();
+        Graphics2D g2 = Theme.smooth(g);
         try {
-            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             synchronized (worldLock) {
                 drawWorld(g2);
                 drawFloatingTexts(g2);
@@ -2494,8 +2471,8 @@ public final class GamePanel extends JPanel
             }
         }
         for (GameMap.Drawable d : drawList) {
-            if (d instanceof Entity) {
-                ((Entity) d).drawHitbox(g2);
+            if (d instanceof Entity entity) {
+                entity.drawHitbox(g2);
             }
         }
     }
@@ -2569,335 +2546,24 @@ public final class GamePanel extends JPanel
 
     /** Everything that sits on the glass in front of the world. */
     private void drawOverlay(Graphics2D g2) {
-        drawNightLighting(g2);
-        drawDangerTint(g2);
-        drawBanner(g2);
-        drawMiniMap(g2);
+        GameOverlay.Viewport view = new GameOverlay.Viewport(getViewWidth(), getViewHeight(), camX, camY);
+        overlay.drawNightLighting(g2, view, map, nightAlpha);
+        overlay.drawDangerTint(g2, view, tickCount);
+        overlay.drawBanner(g2, view, banner, tickCount);
+        overlay.drawMiniMap(g2, view, map, chamber, chamberCleared);
         if (gameOver) {
-            drawGameOverScreen(g2);
+            String stats = "CHAMBER " + highestChamberReached + "   INFECTED KILLED " + kills
+                    + "   PERKS " + getTotalPerkLevels() + "   TIME " + GameData.formatRunTime(getElapsedSeconds());
+            overlay.drawGameOverScreen(g2, view, won, stats);
             return;
         }
-        drawBossBar(g2);
-        drawHint(g2);
+        overlay.drawBossBar(g2, view);
+        overlay.drawHint(g2, view);
         if (paused) {
-            drawPauseScreen(g2);
+            overlay.drawPauseScreen(g2, view);
         } else if (mouseInside) {
-            drawCrosshair(g2);
+            overlay.drawCrosshair(g2, mouseX, mouseY);
         }
-    }
-
-    /** Atmospheric Nightfall darkness with warm light pools around the player, campfire, and guard posts. */
-    private void drawNightLighting(Graphics2D g2) {
-        if (nightAlpha <= 0.01f) {
-            return;
-        }
-        int vw = getViewWidth(), vh = getViewHeight();
-        int mw = vw / SCALE + 2, mh = vh / SCALE + 2;
-        if (nightMask == null || nightMask.getWidth() != mw || nightMask.getHeight() != mh) {
-            nightMask = new BufferedImage(mw, mh, BufferedImage.TYPE_INT_ARGB);
-        }
-        Graphics2D mg = nightMask.createGraphics();
-        mg.setComposite(AlphaComposite.Src);
-        mg.setColor(new Color(8, 12, 26, Math.round(nightAlpha * 130)));
-        mg.fillRect(0, 0, mw, mh);
-
-        mg.setComposite(AlphaComposite.DstOut);
-        punchLightPool(mg, (float) (player.getX() - camX), (float) (player.getY() - camY), 120f);
-        if (map.hasSafeCamp()) {
-            Rectangle camp = map.getCampArea();
-            punchLightPool(mg, (float) (camp.getCenterX() - camX), (float) (camp.getCenterY() - camY), 145f);
-        }
-        for (ExitDoor ed : exitDoors) {
-            punchLightPool(mg, (float) (ed.x - camX), (float) (ed.y - camY), 74f);
-        }
-        for (AllyNpc a : allies) {
-            punchLightPool(mg, (float) (a.x - camX), (float) (a.y - camY), 68f);
-        }
-        for (Point gp : map.getGuardPosts()) {
-            punchLightPool(mg, (float) (gp.x - camX), (float) (gp.y - camY), 68f);
-        }
-        mg.dispose();
-        g2.drawImage(nightMask, 0, 0, vw, vh, null);
-    }
-
-    private static void punchLightPool(Graphics2D mg, float cx, float cy, float radius) {
-        if (cx + radius < 0 || cy + radius < 0 || cx - radius > 1200 || cy - radius > 900) {
-            return;
-        }
-        mg.setPaint(new RadialGradientPaint(cx, cy, radius, new float[]{0f, 0.55f, 1f},
-                new Color[]{new Color(0, 0, 0, 255), new Color(0, 0, 0, 150), new Color(0, 0, 0, 0)}));
-        mg.fillOval(Math.round(cx - radius), Math.round(cy - radius), Math.round(radius * 2), Math.round(radius * 2));
-    }
-
-    /** Red flash when hurt, green tint when poisoned, pulsing red edge when health is low. */
-    private void drawDangerTint(Graphics2D g2) {
-        int w = getViewWidth(), h = getViewHeight();
-        if (player.isHurt()) {
-            g2.setColor(new Color(200, 0, 0, 55));
-            g2.fillRect(0, 0, w, h);
-        } else if (player.isPoisoned()) {
-            g2.setColor(new Color(80, 200, 40, 30));
-            g2.fillRect(0, 0, w, h);
-        }
-        boolean lowHp = player.getHp() * 100 < player.getMaxHp() * 30;
-        if (lowHp || !player.isAlive()) {
-            if (vignette == null || vignette.getWidth() != w || vignette.getHeight() != h) {
-                vignette = createVignette(w, h);
-            }
-            float pulse = player.isAlive() ? 0.55f + 0.45f * (float) Math.abs(Math.sin(tickCount * 0.08)) : 1f;
-            Composite old = g2.getComposite();
-            g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, pulse));
-            g2.drawImage(vignette, 0, 0, null);
-            g2.setComposite(old);
-        }
-    }
-
-    /** Transparent in the middle, dark red at the edges. Made once per panel size. */
-    private static BufferedImage createVignette(int w, int h) {
-        BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = img.createGraphics();
-        float radius = (float) Math.hypot(w / 2.0, h / 2.0);
-        g.setPaint(new RadialGradientPaint(w / 2f, h / 2f, radius, new float[]{0f, 0.55f, 1f},
-                new Color[]{new Color(120, 0, 0, 0), new Color(140, 0, 0, 40), new Color(150, 0, 0, 200)},
-                MultipleGradientPaint.CycleMethod.NO_CYCLE));
-        g.fillRect(0, 0, w, h);
-        g.dispose();
-        return img;
-    }
-
-    /** The boss's health on a glass panel at the top, with the kit's zombie portrait. */
-    private void drawBossBar(Graphics2D g2) {
-        Monster boss = null;
-        for (Monster m : monsters) {
-            if (m.isAlive() && m.getType() == GameData.MonsterType.ZOMBIE_BOSS) {
-                boss = m;
-                break;
-            }
-        }
-        if (boss == null) {
-            return;
-        }
-        Graphics2D g = (Graphics2D) g2.create();
-        BufferedImage portrait = Theme.kit("hud/portrait_zombie", 1);
-        int barW = 300, panelW = barW + portrait.getWidth() + 44, panelH = 52;
-        int x = (getViewWidth() - panelW) / 2, y = 12;
-        Theme.paintPanel(g, Theme.Panel.GLASS, x, y, panelW, panelH, 1);
-        g.drawImage(portrait, x + 12, y + 10, null);
-        int bx = x + portrait.getWidth() + 24;
-        Theme.drawPixelTextShadow(g, boss.getType().displayName.toUpperCase(), bx, y + 10, 2, BANNER_BOSS);
-        String hp = boss.getHp() + "/" + boss.getMaxHp();
-        Theme.drawPixelTextShadow(g, hp, bx + barW - Theme.pixelWidth(hp, 2), y + 10, 2, Theme.TEXT_2);
-        Theme.drawBar(g, Theme.Fill.HEALTH, bx, y + 26, barW, boss.getHp() / (double) boss.getMaxHp(), 2);
-        g.dispose();
-    }
-
-    /** The 56x36 map picture drawn 3x in the kit's minimap frame, with the kit's map markers. */
-    private void drawMiniMap(Graphics2D g2) {
-        BufferedImage mini = map.getMinimap();
-        int s = 3, w = mini.getWidth() * s, h = mini.getHeight() * s;
-        int left = getViewWidth() - w - 22, top = 22;
-        double perPx = s / (double) GameData.TILE;   // mini-map pixels per world pixel
-        Graphics2D g = (Graphics2D) g2.create();
-        g.setColor(GLASS);
-        g.fillRect(left - 4, top - 4, w + 8, h + 8);
-        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.8f));
-        g.drawImage(mini, left, top, w, h, null);
-        g.setComposite(AlphaComposite.SrcOver);
-        if (map.hasSafeCamp()) {
-            Rectangle camp = map.getCampArea();
-            drawMarker(g, "map_marker_safe", left + (int) (camp.getCenterX() * perPx), top + (int) (camp.getCenterY() * perPx));
-        } else if (chamber > 0) {
-            Point tp = map.getTraderPosition();
-            int tx = left + (int) (tp.x * perPx), ty = top + (int) (tp.y * perPx);
-            g.setColor(new Color(0xF5, 0xC4, 0x51));
-            g.fillRect(tx - 3, ty - 3, 6, 6);
-            g.setColor(new Color(40, 28, 12));
-            g.drawRect(tx - 3, ty - 3, 6, 6);
-        }
-        for (HazardTrap t : traps) {
-            if (t.triggered) {
-                continue;
-            }
-            int tx = left + (int) (t.x * perPx), ty = top + (int) (t.y * perPx);
-            if (t.kind == HazardTrap.TrapKind.TOXIC) {
-                g.setColor(new Color(145, 235, 60));
-            } else if (t.kind == HazardTrap.TrapKind.SHOCK) {
-                g.setColor(new Color(95, 225, 255));
-            } else if (t.kind == HazardTrap.TrapKind.FLAME_JET) {
-                g.setColor(new Color(255, 145, 45));
-            } else if (t.kind == HazardTrap.TrapKind.MINE) {
-                g.setColor(new Color(255, 70, 70));
-            } else {
-                g.setColor(new Color(225, 175, 75));
-            }
-            g.fillRect(tx - 1, ty - 1, 2, 2);
-        }
-        for (ExitDoor ed : exitDoors) {
-            int dx = left + (int) (ed.x * perPx), dy = top + (int) (ed.y * perPx);
-            g.setColor(ed.portalColor());
-            g.fillRect(dx - 2, dy - 2, 5, 5);
-        }
-        for (DroppedItem d : drops) {
-            if (d.getType() == GameData.ItemType.CHEST) {
-                drawMarker(g, "map_marker_loot", left + (int) (d.getX() * perPx), top + (int) (d.getY() * perPx));
-            }
-        }
-        g.setColor(Theme.RED);
-        for (Monster m : monsters) {
-            if (!m.isAlive()) {
-                continue;
-            }
-            int mx = left + (int) (m.getX() * perPx), my = top + (int) (m.getY() * perPx);
-            if (m.getType() == GameData.MonsterType.ZOMBIE_BOSS) {
-                drawMarker(g, "map_marker_zombie", mx, my);
-            } else {
-                g.fillRect(mx - 1, my - 1, 3, 3);   // ordinary monsters as small dots, so a horde stays readable
-            }
-        }
-        g.setColor(new Color(0x88D470));
-        for (AllyNpc a : allies) {
-            int ax = left + (int) (a.x * perPx), ay = top + (int) (a.y * perPx);
-            g.fillRect(ax - 1, ay - 1, 3, 3);
-        }
-        g.setColor(new Color(240, 230, 192, 110));
-        g.drawRect(left + (int) (camX * perPx), top + (int) (camY * perPx),
-                (int) (getViewWidth() / (double) SCALE * perPx), (int) (getViewHeight() / (double) SCALE * perPx));
-        drawMarker(g, "map_marker_player", left + (int) (player.getX() * perPx), top + (int) (player.getY() * perPx));
-        Theme.drawMinimapFrame(g, left - 6, top - 6, w + 12, h + 12, 2);
-
-        // Roguelite chamber telemetry box right beneath the minimap
-        int boxY = top + h + 10;
-        Theme.paintPanel(g, Theme.Panel.GLASS, left - 6, boxY, w + 12, 42, 1);
-        String zoneText;
-        Color zoneColor;
-        String intel;
-        if (chamber == 0) {
-            zoneText = "SAFE CAMP HUB";
-            zoneColor = new Color(0x88D470);
-            intel = "NPC [B]   GATE [F]";
-        } else if (chamberCleared) {
-            zoneText = "CH " + chamber + " CLEARED";
-            zoneColor = new Color(0x88D470);
-            intel = "SHOP [B]  PORTAL [F]";
-        } else {
-            zoneText = "CHAMBER " + chamber + " / 15";
-            zoneColor = Theme.GOLD;
-            intel = "FOES " + getHostilesRemaining() + "   SHOP [B]";
-        }
-        Theme.drawPixelTextShadow(g, zoneText, left + 2, boxY + 8, 2, zoneColor);
-        Theme.drawPixelTextShadow(g, intel, left + 2, boxY + 24, 2, Theme.TEXT_2);
-        g.dispose();
-    }
-
-    /** A kit map marker (8 x 8) centred on a mini-map point. */
-    private static void drawMarker(Graphics2D g, String name, int cx, int cy) {
-        g.drawImage(Theme.kit("hud/" + name, 1), cx - 4, cy - 4, null);
-    }
-
-    /** Title in the kit style with a red banner underneath; fades in, stays, fades out. */
-    private void drawBanner(Graphics2D g2) {
-        Banner b = banner;
-        if (b == null) {
-            return;
-        }
-        int age = tickCount - b.startTick;
-        if (age < 0 || age > b.length) {
-            return;
-        }
-        float alpha = Math.min(1f, Math.min(age / 15f, (b.length - age) / 30f));
-        Graphics2D g = (Graphics2D) g2.create();
-        g.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, alpha)));
-        int cx = getViewWidth() / 2, top = getViewHeight() / 7;
-        Theme.drawPixelTextShadow(g, b.title, cx - Theme.pixelWidth(b.title, 5) / 2, top, 5, b.color);
-        top += 28;
-        Theme.drawBanner(g, b.subtitle.toUpperCase(), cx, top + 12, 2);
-        g.dispose();
-    }
-
-    /** Player messages such as "Out of ammo - switched to Pistol", on a glass panel near the bottom. */
-    private void drawHint(Graphics2D g2) {
-        String hint = player.getHint();
-        if (hint == null) {
-            return;
-        }
-        Graphics2D g = (Graphics2D) g2.create();
-        int w = Theme.pixelWidth(hint, 2) + 40, h = 34;
-        int x = (getViewWidth() - w) / 2, y = getViewHeight() - h - 18;
-        Theme.paintPanel(g, Theme.Panel.GLASS, x, y, w, h, 1);
-        Theme.drawPixelTextShadow(g, hint, x + 20, y + 12, 2, Theme.GOLD);
-        g.dispose();
-    }
-
-    /** A kit crosshair that suits the weapon; a ring around it fills up while the weapon reloads. */
-    private void drawCrosshair(Graphics2D g2) {
-        GameData.WeaponType w = player.getCurrentWeapon();
-        String name;
-        if (w.melee) {
-            name = "cursor_attack";
-        } else if (w.pellets > 1 || w.explosive) {
-            name = "crosshair_2";
-        } else if (w.pierce > 1) {
-            name = "crosshair_4";
-        } else {
-            name = "crosshair_1";
-        }
-        BufferedImage cross = Theme.kit("cursors/" + name, 2);
-        g2.drawImage(cross, mouseX - cross.getWidth() / 2, mouseY - cross.getHeight() / 2, null);
-        double reload = player.getReloadProgress();
-        if (reload < 1.0 && player.getCooldownTicks(w) > 20) {
-            g2.setColor(new Color(240, 230, 192, 170));
-            g2.setStroke(new BasicStroke(2f));
-            g2.draw(new Arc2D.Double(mouseX - 20, mouseY - 20, 40, 40, 90, -360 * reload, Arc2D.OPEN));
-        }
-    }
-
-    /** Darkens the game and shows the kit's PAUSED title and the controls as key caps on a glass panel. */
-    private void drawPauseScreen(Graphics2D g2) {
-        int w = getViewWidth(), h = getViewHeight();
-        Graphics2D g = Theme.smooth(g2);
-        g.setColor(SCRIM);
-        g.fillRect(0, 0, w, h);
-        String[][] controls = {
-            {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
-            {"Dash (Dodge)", "space", "shift"}, {"Gate / Portal", "f"},
-            {"Grenade", "mouse_right", "g"}, {"Medkit", "e"},
-            {"Switch weapon (1-7)", "mouse_mid"}, {"Camp NPC [Hub]", "b"},
-            {"Resume", "p", "esc"}
-        };
-        BufferedImage title = Theme.kit("titles/paused", 2);
-        int rowH = 40, rows = (controls.length + 1) / 2;
-        int cardW = 560, cardH = 34 + title.getHeight() + 44 + rows * rowH + 14;
-        int x0 = (w - cardW) / 2, y0 = (h - cardH) / 2;
-        Theme.paintPanel(g, Theme.Panel.GLASS, x0, y0, cardW, cardH, 2);
-        g.drawImage(title, x0 + 34, y0 + 30, null);
-        g.setFont(FONT_HELP);
-        g.setColor(Theme.TEXT_2);
-        int textY = y0 + 30 + title.getHeight() + 24;
-        g.drawString("Press P or Esc to keep playing.", x0 + 36, textY);
-        int colW = (cardW - 68) / 2;
-        for (int i = 0; i < controls.length; i++) {
-            int x = x0 + 34 + (i % 2) * colW;
-            int y = textY + 16 + (i / 2) * rowH;
-            for (int k = 1; k < controls[i].length; k++) {
-                BufferedImage key = Theme.keySprite(controls[i][k], 2);
-                g.drawImage(key, x, y, null);
-                x += key.getWidth() + 4;
-            }
-            g.setColor(Theme.TEXT);
-            g.drawString(controls[i][0], x + 8, y + 21);
-        }
-        g.dispose();
-    }
-
-    /** The kit's "SURVIVED" or "YOU DIED" title with the run's numbers, shown for a moment before the summary. */
-    private void drawGameOverScreen(Graphics2D g2) {
-        int w = getViewWidth(), h = getViewHeight();
-        g2.setColor(SCRIM);
-        g2.fillRect(0, 0, w, h);
-        BufferedImage title = Theme.kit(won ? "titles/survived" : "titles/you_died", 3);
-        g2.drawImage(title, (w - title.getWidth()) / 2, h / 2 - title.getHeight() - 10, null);
-        String stats = "CHAMBER " + highestChamberReached + "   INFECTED KILLED " + kills + "   PERKS " + getTotalPerkLevels() + "   TIME " + formatTime(getElapsedSeconds());
-        Theme.drawPixelTextShadow(g2, stats, (w - Theme.pixelWidth(stats, 3)) / 2, h / 2 + 16, 3, Theme.TEXT);
     }
 
     public int getTotalPerkLevels() {

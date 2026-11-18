@@ -219,7 +219,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return strip;
     }
 
-    /** Name, class, weapon, map and difficulty: everything needed to start a run. */
+    /** Name, class, region and hazard level for a new run. */
     private JComponent buildPlayPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
@@ -460,14 +460,22 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     }
 
     // ================================================================== event handlers
-    /** Every button, tab, class button, check box, combo box, the name field and the animation timer end up here. */
+    /** Start, quit, animation, and launcher selections share this Swing listener. */
     @Override
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
-        if (source == animationTimer) {
+        if (source == startButton || source == nameField) {
+            startSurvival();
+        } else if (source == quitButton) {
+            quitLauncher();
+        } else if (source == animationTimer) {
             heroPanel.tick();
-            return;
+        } else {
+            updateSelection(source);
         }
+    }
+
+    private void updateSelection(Object source) {
         for (int i = 0; i < tabButtons.length; i++) {
             if (source == tabButtons[i]) {
                 selectTab(i);
@@ -475,11 +483,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
                 return;
             }
         }
-        if (source == startButton || source == nameField) {
-            startSurvival();
-        } else if (source == quitButton) {
-            quitLauncher();
-        } else if (source instanceof JRadioButton) {
+        if (source instanceof JRadioButton) {
             showClassInfo();
             AssetLoader.playSound("click");
         } else if (source == mapCombo) {
@@ -579,14 +583,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     /** Validates the name; on a problem it explains it under the field and puts the cursor back there. */
     private String validatePlayerName() {
         String name = nameField.getText().trim();
-        String problem = null;
-        if (name.isEmpty()) {
-            problem = "Please type a name first.";
-        } else if (name.length() > MAX_NAME_LENGTH) {
-            problem = "Too long: " + name.length() + " of max " + MAX_NAME_LENGTH + " characters.";
-        } else if (!name.matches(NAME_PATTERN)) {
-            problem = "Only letters, digits, space and - _ . please.";
-        }
+        String problem = nameProblem(name);
         if (problem != null) {
             selectTab(0);
             nameHintLabel.setText(problem);
@@ -600,6 +597,19 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         clearNameError();
         nameField.setText(name);
         return name;
+    }
+
+    private static String nameProblem(String name) {
+        if (name.isEmpty()) {
+            return "Please type a name first.";
+        }
+        if (name.length() > MAX_NAME_LENGTH) {
+            return "Too long: " + name.length() + " of max " + MAX_NAME_LENGTH + " characters.";
+        }
+        if (!name.matches(NAME_PATTERN)) {
+            return "Only letters, digits, space and - _ . please.";
+        }
+        return null;
     }
 
     private void clearNameError() {
@@ -693,13 +703,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
     // ================================================================== entry point
     public static void main(String[] args) {
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                Theme.installLookAndFeel();
-                MainApplication launcher = new MainApplication();
-                launcher.showLauncher();
-            }
+        SwingUtilities.invokeLater(() -> {
+            Theme.installLookAndFeel();
+            new MainApplication().showLauncher();
         });
     }
 

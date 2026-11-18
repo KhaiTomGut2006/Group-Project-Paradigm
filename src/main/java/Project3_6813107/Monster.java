@@ -140,8 +140,7 @@ public final class Monster extends Entity {
 
     /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside Safe Camp. */
     private void moveTowardsTarget(double dist) {
-        boolean playerInCamp = map != null && map.hasSafeCamp() && target != null
-                && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+        boolean playerInCamp = targetIsInCamp();
         if (!raiding && dist > 260.0) {
             provoked = false;
         }
@@ -220,8 +219,7 @@ public final class Monster extends Entity {
         if (type.rangedProjectile == null) {
             return;
         }
-        boolean playerInCamp = map != null && map.hasSafeCamp() && target != null
-                && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+        boolean playerInCamp = targetIsInCamp();
         if (!raiding && playerInCamp) {
             aimWarning = 0;
             return;
@@ -252,6 +250,11 @@ public final class Monster extends Entity {
         if (rangedCooldown == 0 && dist <= type.rangedRange && inSight) {
             aimWarning = type == GameData.MonsterType.BANDIT_SHOOTER ? 7 : 1;
         }
+    }
+
+    private boolean targetIsInCamp() {
+        return map != null && map.hasSafeCamp() && target != null
+                && map.getCampArea().contains((int) target.getX(), (int) target.getY());
     }
 
     private void queueEnemyVolley(double centerAngle, int count, double stepRad,

@@ -94,9 +94,9 @@ public final class AssetLoader {
         int count = Math.max(1, frameCount);
         int frameW = sheet.getWidth() / count;
         BufferedImage[] frames = new BufferedImage[count];
+        // A missing sheet gives full-size checker frames instead of slices of the fallback.
+        boolean usable = frameW > 0 && !MISSING.contains(relPath);
         for (int i = 0; i < count; i++) {
-            // a missing sheet gives full-size checker frames instead of thin slivers of the fallback
-            boolean usable = frameW > 0 && !MISSING.contains(relPath);
             frames[i] = usable ? sheet.getSubimage(i * frameW, 0, frameW, sheet.getHeight()) : makeFallback(32, 32);
         }
         FRAMES_CACHE.put(key, frames);
@@ -256,18 +256,20 @@ public final class AssetLoader {
     private static volatile int volumePercent = 70;
     private static final int MAX_PLAYING_SOUNDS = 10;   // more at once only turns into noise
     private static final AtomicInteger PLAYING = new AtomicInteger();
-    private static final Map<String, byte[]> SOUND_DATA = new HashMap<>();
-    private static final Map<String, AudioFormat> SOUND_FORMAT = new HashMap<>();
+    private record Sound(byte[] samples, AudioFormat format) {}
+
+    private static final Map<String, Sound> SOUNDS = new HashMap<>();
     private static final Map<String, Long> LAST_PLAYED = new HashMap<>();
     private static final Object MUSIC_LOCK = new Object();
     private static Clip musicClip;
     private static String musicName;
     private static boolean audioBroken;   // set after the first hard failure so we stop retrying
 
-    /** Reads a .wav into memory once; returns false if it cannot be used. */
-    private static synchronized boolean loadSound(String name) {
-        if (SOUND_DATA.containsKey(name)) {
-            return true;
+    /** Reads a .wav into memory once; returns null if it cannot be used. */
+    private static synchronized Sound loadSound(String name) {
+        Sound cached = SOUNDS.get(name);
+        if (cached != null) {
+            return cached;
         }
         try (InputStream raw = open("sounds/" + name + ".wav");
              AudioInputStream in = AudioSystem.getAudioInputStream(new java.io.BufferedInputStream(raw))) {
@@ -277,29 +279,27 @@ public final class AssetLoader {
             while ((read = in.read(buffer)) > 0) {
                 bytes.write(buffer, 0, read);
             }
-            SOUND_DATA.put(name, bytes.toByteArray());
-            SOUND_FORMAT.put(name, in.getFormat());
-            return true;
+            Sound sound = new Sound(bytes.toByteArray(), in.getFormat());
+            SOUNDS.put(name, sound);
+            return sound;
         } catch (Exception ex) {
             // missing file, unsupported format ... the game simply stays silent for this sound
-            return false;
+            return null;
         }
     }
 
     /** Opens a Clip filled with the sound's samples, or returns null when audio is not available. */
     private static Clip createClip(String name) {
-        if (audioBroken || !loadSound(name)) {
+        if (audioBroken) {
             return null;
         }
-        byte[] data;
-        AudioFormat format;
-        synchronized (AssetLoader.class) {
-            data = SOUND_DATA.get(name);
-            format = SOUND_FORMAT.get(name);
+        Sound sound = loadSound(name);
+        if (sound == null) {
+            return null;
         }
         try {
             Clip clip = AudioSystem.getClip();
-            clip.open(format, data, 0, data.length);
+            clip.open(sound.format(), sound.samples(), 0, sound.samples().length);
             applyVolume(clip);
             return clip;
         } catch (IllegalArgumentException ex) {
@@ -433,6 +433,7 @@ public final class AssetLoader {
 
     /** True when the named .wav exists and can be decoded (used by tests and the launcher). */
     public static synchronized boolean canLoadSound(String name) {
-        return loadSound(name) && SOUND_DATA.get(name).length > 0;
+        Sound sound = loadSound(name);
+        return sound != null && sound.samples().length > 0;
     }
 }

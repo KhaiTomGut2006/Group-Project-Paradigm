@@ -637,6 +637,10 @@ public final class GameData {
     }
 
     // ------------------------------------------------------------------ high scores
+    static String formatRunTime(int seconds) {
+        return String.format("%d:%02d", seconds / 60, seconds % 60);
+    }
+
     /** One finished run, as shown in the launcher's high-score JTable. */
     public static class ScoreEntry {
         public String name, playerClass, map;
@@ -676,22 +680,9 @@ public final class GameData {
         try (BufferedReader in = new BufferedReader(new FileReader(file))) {
             String line;
             while ((line = in.readLine()) != null) {
-                String[] parts = line.split("\t");
-                if (parts.length != 7) {
-                    continue;  // skip broken lines instead of failing the whole table
-                }
-                try {
-                    ScoreEntry e = new ScoreEntry();
-                    e.name = parts[0];
-                    e.playerClass = parts[1];
-                    e.map = parts[2];
-                    e.score = Integer.parseInt(parts[3]);
-                    e.kills = Integer.parseInt(parts[4]);
-                    e.wave = Integer.parseInt(parts[5]);
-                    e.seconds = Integer.parseInt(parts[6]);
-                    list.add(e);
-                } catch (NumberFormatException ex) {
-                    System.err.println("Skipping bad score line: " + line);
+                ScoreEntry score = parseScore(line);
+                if (score != null) {
+                    list.add(score);
                 }
             }
         } catch (IOException ex) {
@@ -699,6 +690,27 @@ public final class GameData {
         }
         list.sort((a, b) -> Integer.compare(b.score, a.score));
         return list;
+    }
+
+    private static ScoreEntry parseScore(String line) {
+        String[] parts = line.split("\t");
+        if (parts.length != 7) {
+            return null;
+        }
+        try {
+            ScoreEntry score = new ScoreEntry();
+            score.name = parts[0];
+            score.playerClass = parts[1];
+            score.map = parts[2];
+            score.score = Integer.parseInt(parts[3]);
+            score.kills = Integer.parseInt(parts[4]);
+            score.wave = Integer.parseInt(parts[5]);
+            score.seconds = Integer.parseInt(parts[6]);
+            return score;
+        } catch (NumberFormatException ex) {
+            System.err.println("Skipping bad score line: " + line);
+            return null;
+        }
     }
 
     /** Appends one run to the score file. Never throws. */

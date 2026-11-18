@@ -10,11 +10,16 @@ Natthanon Achachan          6813241
 What the game is
 ----------------
 A 2D top-down zombie survival game written with Java Swing (javax.swing, java.awt,
-javax.sound.sampled, javax.imageio only). Walk with W A S D, aim with the mouse, scavenge
-outside the camp to hunt roaming zombies and open Supply Chests, then return to Base Camp
-(press B) to talk to camp NPCs: craft weapons, upgrade stats, heal wounds, and build Guard
-Posts, Fortified Walls, a Medical Tent, and a Supply Depot before periodic Horde Raids hit.
-Survive 5 minutes to win.
+javax.sound.sampled, javax.imageio only). Start in Safe Camp with a Survival Knife.
+Press B in camp to use the Workshop, craft a Pistol and other weapons, equip one
+unlocked firearm for the expedition, and buy permanent upgrades.
+
+Move with W A S D or the arrow keys, aim with the mouse, and hold left-click to
+attack. Use Space or Shift to dash, right-click or G to throw a grenade, and
+P or Esc to pause. Press F near the gate to enter Chamber 1. Clear the hostiles
+to unlock the next portals, collect salvage, and press B for the Field Merchant.
+After Chamber 15, extract for victory or take the portal into Endless Abyss.
+Permanent salvage and unlocks carry over when you return to Safe Camp.
 
 How to run
 ----------
@@ -29,9 +34,10 @@ from src/main/java/Project3_6813107/resources relative to the working folder.
 
 Source files (package Project3_6813107)
 ---------------------------------------
-MainApplication.java  launcher window (name, class, options, start weapon, map, high scores)
+MainApplication.java  launcher window (name, class, options, region, high scores)
 GameFrame.java        game window: HUD around the GamePanel
-GamePanel.java        game loop thread, wave spawner thread, input, camera, drawing
+GamePanel.java        game loop, reinforcement requests, input, room transitions, world drawing
+GameOverlay.java      screen effects, chamber minimap, crosshair, pause and result screens
 UpgradeDialog.java    workshop dialog with the crafting JTable
 Theme.java            Hollow Creek UI kit theme: 9-slice panels, buttons, font, slots, cursors
 Entity.java           superclass of everything in the world (position, hitbox, hp, collision)
@@ -39,7 +45,8 @@ Player.java           the survivor: movement, weapons, inventory, crafting, upgr
 Monster.java          the 5 enemies (zombie, runner, toxic zombie, bandit, boss)
 Bullet.java           bullets, rockets, grenades, enemy shots and melee swings
 DroppedItem.java      loot on the ground (magnet pickup, supply chests)
-GameMap.java          the 5 arenas: ground, props, walls, collision, spawn points, path finding
+GameMap.java          Safe Camp and procedural rooms: layouts, collision, spawning, path finding
+MapSprites.java       sprite sheet coordinates and blocking footprints for map props
 GameData.java         all game data: enums for items, weapons, monsters, classes, maps, recipes
 AssetLoader.java      loads and cuts sprite sheets, plays sounds (never crashes on missing files)
 

@@ -1334,9 +1334,7 @@ final class Theme {
         int w = 12 + textW + 14;
         BufferedImage banner = new BufferedImage(w, src.getHeight(), BufferedImage.TYPE_INT_ARGB);
         Graphics2D b = banner.createGraphics();
-        b.drawImage(src, 0, 0, 11, src.getHeight(), 0, 0, 11, src.getHeight(), null);                   // left end
-        b.drawImage(src, 11, 0, w - 14, src.getHeight(), 11, 0, 12, src.getHeight(), null);             // middle
-        b.drawImage(src, w - 14, 0, w, src.getHeight(), src.getWidth() - 14, 0, src.getWidth(), src.getHeight(), null);
+        drawHudStrip(b, src, 0, 0, w, 1, 11, 14);
         drawPixelText(b, text, 12, 5, 2, TEXT);
         b.dispose();
         Graphics2D g = (Graphics2D) g2.create();
@@ -1352,9 +1350,7 @@ final class Theme {
         int w = 17 + textW + 5;
         BufferedImage plate = new BufferedImage(w, src.getHeight(), BufferedImage.TYPE_INT_ARGB);
         Graphics2D p = plate.createGraphics();
-        p.drawImage(src, 0, 0, 16, src.getHeight(), 0, 0, 16, src.getHeight(), null);
-        p.drawImage(src, 16, 0, w - 2, src.getHeight(), 16, 0, 17, src.getHeight(), null);
-        p.drawImage(src, w - 2, 0, w, src.getHeight(), src.getWidth() - 2, 0, src.getWidth(), src.getHeight(), null);
+        drawHudStrip(p, src, 0, 0, w, 1, 16, 2);
         drawPixelText(p, count, 18, 5, 1, TEXT);
         p.dispose();
         Graphics2D g = (Graphics2D) g2.create();
@@ -1372,13 +1368,23 @@ final class Theme {
     static void drawHotbarFrame(Graphics2D g2, int x, int y, int slots, int scale) {
         BufferedImage src = kit("hud/hotbar_6", 1);
         int w = hotbarWidth(slots, 1);
-        int h = src.getHeight();
         Graphics2D g = (Graphics2D) g2.create();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.drawImage(src, x, y, x + 2 * scale, y + h * scale, 0, 0, 2, h, null);
-        g.drawImage(src, x + 2 * scale, y, x + (w - 2) * scale, y + h * scale, 2, 0, 3, h, null);
-        g.drawImage(src, x + (w - 2) * scale, y, x + w * scale, y + h * scale, src.getWidth() - 2, 0, src.getWidth(), h, null);
+        drawHudStrip(g, src, x, y, w, scale, 2, 2);
         g.dispose();
+    }
+
+    /** Draws the two end caps and stretches the source column beside the left cap. */
+    private static void drawHudStrip(Graphics2D g, BufferedImage src, int x, int y, int width, int scale,
+            int leftCap, int rightCap) {
+        int height = src.getHeight();
+        int bottom = y + height * scale;
+        int leftEnd = x + leftCap * scale;
+        int rightStart = x + (width - rightCap) * scale;
+        int right = x + width * scale;
+        g.drawImage(src, x, y, leftEnd, bottom, 0, 0, leftCap, height, null);
+        g.drawImage(src, leftEnd, y, rightStart, bottom, leftCap, 0, leftCap + 1, height, null);
+        g.drawImage(src, rightStart, y, right, bottom, src.getWidth() - rightCap, 0, src.getWidth(), height, null);
     }
 
     static int hotbarWidth(int slots, int scale) {
@@ -1392,9 +1398,8 @@ final class Theme {
     static synchronized void drawMinimapFrame(Graphics2D g2, int x, int y, int w, int h, int scale) {
         BufferedImage src = kit("hud/minimap_frame_square", 1);
         if (minimapFrame == null) {
-            BufferedImage plain = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            BufferedImage plain = copyImage(src);
             Graphics2D p = plain.createGraphics();
-            p.drawImage(src, 0, 0, null);
             p.setComposite(AlphaComposite.Src);
             p.drawImage(src, 28, 0, 36, 5, 20, 0, 28, 5, null);   // copy a plain piece of edge over the notch
             p.dispose();

@@ -123,15 +123,9 @@ public final class Bullet extends Entity {
         }
         animTimer++;
         switch (kind) {
-            case SLASH:
-                updateSlash();
-                break;
-            case GRENADE:
-                updateGrenade();
-                break;
-            default:
-                updateFlying();
-                break;
+            case SLASH -> updateSlash();
+            case GRENADE -> updateGrenade();
+            default -> updateFlying();
         }
     }
 
@@ -187,27 +181,27 @@ public final class Bullet extends Entity {
         if (!alive || target == null || !target.isAlive() || kind == GameData.Projectile.GRENADE || alreadyHit.contains(target)) {
             return false;
         }
-        boolean hit;
-        if (kind == GameData.Projectile.SLASH) {
-            hit = isInsideArc(target);
-        } else {
-            Rectangle me = new Rectangle((int) (x - kind.radius), (int) (y - kind.radius), kind.radius * 2, kind.radius * 2);
-            hit = me.intersects(target.getBounds());
-        }
+        boolean hit = isMelee() ? isInsideArc(target) : projectileBounds().intersects(target.getBounds());
         if (!hit) {
             return false;
         }
         alreadyHit.add(target);
-        if (kind != GameData.Projectile.SLASH) {
-            if (explosive) {
-                end(true);
-            } else if (pierceLeft > 0) {
-                pierceLeft--;
-            } else {
-                alive = false;
-            }
+        if (isMelee()) {
+            return true;
+        }
+        if (explosive) {
+            end(true);
+        } else if (pierceLeft > 0) {
+            pierceLeft--;
+        } else {
+            alive = false;
         }
         return true;
+    }
+
+    private Rectangle projectileBounds() {
+        int radius = kind.radius;
+        return new Rectangle((int) (x - radius), (int) (y - radius), radius * 2, radius * 2);
     }
 
     /** A target is inside the swing if it is within reach and within half the arc of the swing direction. */

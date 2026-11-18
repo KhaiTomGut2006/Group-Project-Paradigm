@@ -200,11 +200,9 @@ public abstract class Entity implements GameMap.Drawable {
         int h = (int) Math.round(frame.getHeight() * scale);
         int left = (int) Math.round(x - w / 2.0);
         int top = (int) Math.round(getFeetY()) - h;
-        if (mirror) {
-            g2.drawImage(frame, left + w, top, -w, h, null);
-        } else {
-            g2.drawImage(frame, left, top, w, h, null);
-        }
+        int drawX = mirror ? left + w : left;
+        int drawWidth = mirror ? -w : w;
+        g2.drawImage(frame, drawX, top, drawWidth, h, null);
     }
 
     /** Same as drawFrame but painted as a solid white silhouette: the classic "I got hit" flash. */

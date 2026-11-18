@@ -652,16 +652,21 @@ public final class Player extends Entity {
 
     /** Affordable, not maxed/owned, and the required weapon is owned. */
     public synchronized boolean canCraft(GameData.UpgradeRecipe r) {
-        if (r == null || isMaxed(r)) {
-            return false;
-        }
-        if (r.kind == GameData.RecipeKind.HEAL_NOW && hp >= maxHp && !isPoisoned()) {
-            return false;
-        }
-        if (r.requiredWeapon != null && !ownedWeapons.contains(r.requiredWeapon)) {
-            return false;
-        }
-        return hasItems(getCost(r));
+        return meetsCraftRequirements(r) && hasItems(getCost(r));
+    }
+
+    private boolean meetsCraftRequirements(GameData.UpgradeRecipe r) {
+        return r != null && !isMaxed(r)
+                && (r.kind != GameData.RecipeKind.HEAL_NOW || needsTreatment())
+                && hasRequiredWeapon(r);
+    }
+
+    private boolean needsTreatment() {
+        return hp < maxHp || isPoisoned();
+    }
+
+    private boolean hasRequiredWeapon(GameData.UpgradeRecipe r) {
+        return r.requiredWeapon == null || ownedWeapons.contains(r.requiredWeapon);
     }
 
     /** Short text for the workshop table: "Ready", "Owned", "Lv 2/5", "MAX", "Need Blueprint", "Have 3" ... */
@@ -671,7 +676,7 @@ public final class Player extends Entity {
             if (ownedWeapons.contains(r.weapon)) {
                 return "Owned";
             }
-            if (r.requiredWeapon != null && !ownedWeapons.contains(r.requiredWeapon)) {
+            if (!hasRequiredWeapon(r)) {
                 return "Need " + r.requiredWeapon.displayName;
             }
             Integer bp = cost.get(GameData.ItemType.BLUEPRINT);
@@ -681,7 +686,7 @@ public final class Player extends Entity {
             return hasItems(cost) ? "Ready" : "Missing items";
         }
         if (r.kind == GameData.RecipeKind.HEAL_NOW) {
-            if (hp >= maxHp && !isPoisoned()) {
+            if (!needsTreatment()) {
                 return "Full HP";
             }
             return hasItems(cost) ? "Ready" : "Missing items";
@@ -698,10 +703,13 @@ public final class Player extends Entity {
 
     /** Pays the cost and applies the recipe. Returns a line for the craft log, or null if it is not possible. */
     public synchronized String craft(GameData.UpgradeRecipe r) {
-        if (!canCraft(r)) {
+        if (!meetsCraftRequirements(r)) {
             return null;
         }
         Map<GameData.ItemType, Integer> cost = getCost(r);
+        if (!hasItems(cost)) {
+            return null;
+        }
         for (Map.Entry<GameData.ItemType, Integer> e : cost.entrySet()) {
             inventory.put(e.getKey(), inventory.get(e.getKey()) - e.getValue());
         }
@@ -717,19 +725,18 @@ public final class Player extends Entity {
                 flickerTick = FLICKER_TICKS;
                 return "Unlocked & Equipped " + r.weapon.displayName + paid;
             case DEATH_DEFIANCE:
-                levels.put(r.kind, levels.get(r.kind) + 1);
+                int reviveLevel = increaseLevel(r.kind);
                 deathDefianceLeft++;
-                return r.name + " -> Lv " + levels.get(r.kind) + " (Revives: " + deathDefianceLeft + ")" + paid;
+                return r.name + " -> Lv " + reviveLevel + " (Revives: " + deathDefianceLeft + ")" + paid;
             case MEDKIT:
                 inventory.put(GameData.ItemType.MEDKIT, inventory.get(GameData.ItemType.MEDKIT) + 1);
                 return "Packed +1 Medkit" + paid;
             case BASE_MEDIC:
-                levels.put(r.kind, levels.get(r.kind) + 1);
-                int perClear = levels.get(r.kind) * GameData.CHAMBER_CLEAR_HEAL_PER_LEVEL;
-                return r.name + " -> Lv " + levels.get(r.kind) + " (+" + perClear + " HP/chamber)" + paid;
+                int medicLevel = increaseLevel(r.kind);
+                int perClear = medicLevel * GameData.CHAMBER_CLEAR_HEAL_PER_LEVEL;
+                return r.name + " -> Lv " + medicLevel + " (+" + perClear + " HP/chamber)" + paid;
             case BASE_FARM:
-                int newFarm = levels.get(r.kind) + 1;
-                levels.put(r.kind, newFarm);
+                int newFarm = increaseLevel(r.kind);
                 inventory.put(GameData.ItemType.AMMO, inventory.get(GameData.ItemType.AMMO) + 25);
                 if (newFarm >= 2) {
                     inventory.put(GameData.ItemType.GRENADE, inventory.get(GameData.ItemType.GRENADE) + 1);
@@ -740,15 +747,20 @@ public final class Player extends Entity {
                 curePoison();
                 return "Camp Doctor treated wounds (+65 HP)" + paid;
             case MAX_HP:
-                levels.put(r.kind, levels.get(r.kind) + 1);
+                int healthLevel = increaseLevel(r.kind);
                 int extra = (int) GameData.RecipeKind.MAX_HP.perLevel;
                 maxHp += extra;
                 heal(extra);
-                return r.name + " -> Lv " + levels.get(r.kind) + paid;
+                return r.name + " -> Lv " + healthLevel + paid;
             default:
-                levels.put(r.kind, levels.get(r.kind) + 1);
-                return r.name + " -> Lv " + levels.get(r.kind) + paid;
+                return r.name + " -> Lv " + increaseLevel(r.kind) + paid;
         }
+    }
+
+    private int increaseLevel(GameData.RecipeKind kind) {
+        int level = levels.get(kind) + 1;
+        levels.put(kind, level);
+        return level;
     }
 
     // ------------------------------------------------------------------ derived stats (HUD getters)

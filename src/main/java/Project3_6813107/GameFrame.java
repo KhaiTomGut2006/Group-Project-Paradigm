@@ -37,7 +37,7 @@ import javax.swing.border.EmptyBorder;
 
 /**
  * The game window (1100 x 660), drawn with the Hollow Creek UI kit: a metal HUD plate on top
- * (heart, health bar, armour segments, status icons, wave and time, score, kills, auto-fire,
+ * (heart, health bar, armour segments, status icons, chamber progress, allies, kills, auto-fire,
  * pause, quit), the GamePanel in the middle, and a metal plate at the bottom (weapon hotbar,
  * ammo counter, backpack slots, WORKSHOP button).
  *
@@ -61,10 +61,10 @@ public final class GameFrame extends JFrame implements ActionListener {
     private JLabel poisonedIcon;   // kit status icons, shown only while they apply
     private JLabel injuredIcon;
     private JLabel bleedingIcon;
-    private Theme.PixelLabel waveLabel;
-    private Theme.PixelLabel timerLabel;
-    private JProgressBar waveBar;
-    private Theme.PixelLabel scoreValueLabel;
+    private Theme.PixelLabel chamberLabel;
+    private Theme.PixelLabel objectiveLabel;
+    private JProgressBar chamberProgress;
+    private Theme.PixelLabel alliesLabel;
     private Theme.PixelLabel killsValueLabel;
     private JCheckBox autoFireBox;
     private JButton pauseButton;
@@ -134,15 +134,15 @@ public final class GameFrame extends JFrame implements ActionListener {
         JPanel left = Theme.row(8, heartIcon, column(stack(hpBar), hpValueLabel),
                 column(armorSegments, Theme.caption("Armor")), Theme.row(2, poisonedIcon, injuredIcon, bleedingIcon));
 
-        waveLabel = new Theme.PixelLabel("DAY 1: DAYLIGHT - SAFE CAMP", 2, Theme.TEXT_2);
-        timerLabel = new Theme.PixelLabel("5:00", 4, Theme.TEXT);
-        timerLabel.setShadow(true);
-        waveBar = Theme.bar(Theme.Fill.STAMINA, 170, 1);
+        chamberLabel = new Theme.PixelLabel("DAY 1: DAYLIGHT - SAFE CAMP", 2, Theme.TEXT_2);
+        objectiveLabel = new Theme.PixelLabel("5:00", 4, Theme.TEXT);
+        objectiveLabel.setShadow(true);
+        chamberProgress = Theme.bar(Theme.Fill.STAMINA, 170, 1);
         JPanel middle = Theme.transparentPanel(new GridBagLayout());
-        middle.add(column(centred(waveLabel), centred(timerLabel), centred(waveBar)));
+        middle.add(column(centred(chamberLabel), centred(objectiveLabel), centred(chamberProgress)));
 
-        scoreValueLabel = new Theme.PixelLabel("1 NPC", 2, Theme.GOLD);
-        scoreValueLabel.setToolTipText("Active NPC allies & camp guards (recruit more at Base Camp [B])");
+        alliesLabel = new Theme.PixelLabel("1 NPC", 2, Theme.GOLD);
+        alliesLabel.setToolTipText("Active NPC allies & camp guards (recruit more at Base Camp [B])");
         killsValueLabel = new Theme.PixelLabel("0", 3, Theme.TEXT);
         autoFireBox = new JCheckBox("Auto-fire", settings.autoFire);
         Theme.styleCheckBox(autoFireBox);
@@ -150,7 +150,7 @@ public final class GameFrame extends JFrame implements ActionListener {
         autoFireBox.addActionListener(this);
         pauseButton = makeButton("Pause", Theme.ButtonStyle.GREY, "p");
         quitButton = makeButton("Quit", Theme.ButtonStyle.GREY, null);
-        JPanel right = Theme.row(10, column(Theme.caption("Allies"), scoreValueLabel),
+        JPanel right = Theme.row(10, column(Theme.caption("Allies"), alliesLabel),
                 column(Theme.caption("Kills"), killsValueLabel), autoFireBox, Theme.row(4, pauseButton, quitButton));
 
         return makePlate(left, middle, right);
@@ -263,8 +263,8 @@ public final class GameFrame extends JFrame implements ActionListener {
         poisonedIcon.setVisible(p.isPoisoned());
         injuredIcon.setVisible(p.isAlive() && hpPercent < 30);
         bleedingIcon.setVisible(p.isHurt());
-        refreshWaveAndTime();
-        scoreValueLabel.setText(gamePanel.getAllyCount() + " NPC / " + p.getDeathDefianceLeft() + " DD");
+        refreshChamberHud();
+        alliesLabel.setText(gamePanel.getAllyCount() + " NPC / " + p.getDeathDefianceLeft() + " DD");
         killsValueLabel.setText(String.valueOf(gamePanel.getKills()));
         pauseButton.setText(gamePanel.isPaused() ? "RESUME" : "PAUSE");
         workshopButton.setText(gamePanel.getChamber() > 0 ? "Shop NPC" : "Camp NPC");
@@ -276,29 +276,32 @@ public final class GameFrame extends JFrame implements ActionListener {
         refreshBackpack(p.getInventory());
     }
 
-    private void refreshWaveAndTime() {
-        int c = gamePanel.getChamber();
-        if (c == 0) {
-            waveLabel.setText("SAFE CAMP HUB - RUN #" + gamePanel.getRunNumber());
-            waveLabel.setColor(new Color(0x88D470));
-            waveBar.setValue(100);
-            timerLabel.setText("GATE [F]");
-            timerLabel.setColor(Theme.GOLD);
+    private void refreshChamberHud() {
+        int chamber = gamePanel.getChamber();
+        if (chamber == 0) {
+            chamberLabel.setText("SAFE CAMP HUB - RUN #" + gamePanel.getRunNumber());
+            chamberLabel.setColor(new Color(0x88D470));
+            chamberProgress.setValue(100);
+            objectiveLabel.setText("GATE [F]");
+            objectiveLabel.setColor(Theme.GOLD);
             return;
         }
-        String act = gamePanel.getActLabel(c);
-        String cType = gamePanel.getCurrentChamberType().displayName.toUpperCase();
-        String status = act + " - CH " + c + (c <= 15 ? "/15" : "+") + " (" + cType + ")";
-        waveLabel.setText(status);
+        String act = gamePanel.getActLabel(chamber);
+        String chamberType = gamePanel.getCurrentChamberType().displayName.toUpperCase();
+        String status = act + " - CH " + chamber
+                + (chamber <= GameData.TOTAL_CHAMBERS ? "/" + GameData.TOTAL_CHAMBERS : "+")
+                + " (" + chamberType + ")";
+        chamberLabel.setText(status);
         boolean clear = gamePanel.isChamberCleared();
-        waveLabel.setColor(clear ? new Color(0x88D470) : (c % 5 == 0 ? Theme.RED : Theme.GOLD));
-        waveBar.setValue(gamePanel.getChamberClearPercent());
+        boolean bossChamber = chamber % GameData.BOSS_EVERY_CHAMBERS == 0;
+        chamberLabel.setColor(clear ? new Color(0x88D470) : (bossChamber ? Theme.RED : Theme.GOLD));
+        chamberProgress.setValue(gamePanel.getChamberClearPercent());
         if (clear) {
-            timerLabel.setText("PORTAL [F]");
-            timerLabel.setColor(new Color(0x88D470));
+            objectiveLabel.setText("PORTAL [F]");
+            objectiveLabel.setColor(new Color(0x88D470));
         } else {
-            timerLabel.setText("FOES: " + gamePanel.getHostilesRemaining());
-            timerLabel.setColor(c % 5 == 0 ? Theme.RED : Theme.TEXT);
+            objectiveLabel.setText("FOES: " + gamePanel.getHostilesRemaining());
+            objectiveLabel.setColor(bossChamber ? Theme.RED : Theme.TEXT);
         }
     }
 
@@ -326,10 +329,6 @@ public final class GameFrame extends JFrame implements ActionListener {
             backpackRow.revalidate();
             backpackRow.repaint();
         }
-    }
-
-    private static String formatTime(int seconds) {
-        return String.format("%d:%02d", seconds / 60, seconds % 60);
     }
 
     /**
@@ -459,12 +458,16 @@ public final class GameFrame extends JFrame implements ActionListener {
         if (dialogOpen || closed || gamePanel.isGameOver()) {
             return;
         }
+        showPausedDialog(() -> new UpgradeDialog(this, gamePanel.getPlayer()).setVisible(true));
+    }
+
+    /** Keeps the pause state and returns keyboard focus after a modal game dialog. */
+    private void showPausedDialog(Runnable showDialog) {
         dialogOpen = true;
         boolean wasPaused = gamePanel.isPaused();
         gamePanel.pauseGame();
         try {
-            UpgradeDialog dialog = new UpgradeDialog(this, gamePanel.getPlayer());
-            dialog.setVisible(true);   // modal: this line waits until the dialog is closed
+            showDialog.run();
         } finally {
             dialogOpen = false;
         }
@@ -495,70 +498,59 @@ public final class GameFrame extends JFrame implements ActionListener {
         if (dialogOpen || closed || gamePanel.isGameOver() || choices == null || choices.isEmpty()) {
             return;
         }
-        dialogOpen = true;
-        boolean wasPaused = gamePanel.isPaused();
-        gamePanel.pauseGame();
-        try {
-            JDialog dlg = new JDialog(this, "Choose a Tactical Perk", true);
-            dlg.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
-            JPanel root = new JPanel(new BorderLayout(0, 14));
-            root.setBackground(Theme.BG);
-            root.setBorder(new EmptyBorder(18, 22, 18, 22));
+        showPausedDialog(() -> showPerkChoices(choices));
+    }
 
-            Theme.PixelLabel header = new Theme.PixelLabel("CHAMBER CLEARED - CHOOSE 1 TACTICAL PERK", 3, Theme.GOLD);
-            header.setShadow(true);
-            JPanel top = Theme.transparentPanel(new GridBagLayout());
-            top.add(header);
-            root.add(top, BorderLayout.NORTH);
+    private void showPerkChoices(List<GameData.TacticalPerk> choices) {
+        JDialog dlg = new JDialog(this, "Choose a Tactical Perk", true);
+        dlg.setDefaultCloseOperation(JDialog.DO_NOTHING_ON_CLOSE);
+        JPanel root = new JPanel(new BorderLayout(0, 14));
+        root.setBackground(Theme.BG);
+        root.setBorder(new EmptyBorder(18, 22, 18, 22));
 
-            JPanel grid = Theme.transparentPanel(new GridLayout(1, choices.size(), 12, 0));
-            Player p = gamePanel.getPlayer();
-            for (GameData.TacticalPerk perk : choices) {
-                Theme.Card card = new Theme.Card(new BorderLayout(0, 8), Theme.Panel.PAPER);
-                card.setPreferredSize(new Dimension(235, 220));
-                int curLv = p.getPerkLevel(perk);
-                String lvTag = curLv == 0 ? "NEW LV 1" : "LV " + curLv + " -> " + (curLv + 1);
-                Theme.PixelLabel title = new Theme.PixelLabel(perk.displayName.toUpperCase(), 2, Theme.DARK_RED);
-                Theme.PixelLabel lvLabel = new Theme.PixelLabel(lvTag, 2, Theme.DARK_GREEN);
-                JPanel head = Theme.transparentPanel(new BorderLayout(0, 4));
-                head.add(title, BorderLayout.NORTH);
-                head.add(lvLabel, BorderLayout.SOUTH);
-                card.add(head, BorderLayout.NORTH);
+        Theme.PixelLabel header = new Theme.PixelLabel("CHAMBER CLEARED - CHOOSE 1 TACTICAL PERK", 3, Theme.GOLD);
+        header.setShadow(true);
+        JPanel top = Theme.transparentPanel(new GridBagLayout());
+        top.add(header);
+        root.add(top, BorderLayout.NORTH);
 
-                JTextArea desc = new JTextArea(perk.description);
-                desc.setEditable(false);
-                desc.setLineWrap(true);
-                desc.setWrapStyleWord(true);
-                desc.setOpaque(false);
-                desc.setFont(Theme.font(Font.PLAIN, 13));
-                desc.setForeground(Theme.PAPER_TEXT);
-                card.add(desc, BorderLayout.CENTER);
+        JPanel grid = Theme.transparentPanel(new GridLayout(1, choices.size(), 12, 0));
+        Player p = gamePanel.getPlayer();
+        for (GameData.TacticalPerk perk : choices) {
+            Theme.Card card = new Theme.Card(new BorderLayout(0, 8), Theme.Panel.PAPER);
+            card.setPreferredSize(new Dimension(235, 220));
+            int curLv = p.getPerkLevel(perk);
+            String lvTag = curLv == 0 ? "NEW LV 1" : "LV " + curLv + " -> " + (curLv + 1);
+            Theme.PixelLabel title = new Theme.PixelLabel(perk.displayName.toUpperCase(), 2, Theme.DARK_RED);
+            Theme.PixelLabel lvLabel = new Theme.PixelLabel(lvTag, 2, Theme.DARK_GREEN);
+            JPanel head = Theme.transparentPanel(new BorderLayout(0, 4));
+            head.add(title, BorderLayout.NORTH);
+            head.add(lvLabel, BorderLayout.SOUTH);
+            card.add(head, BorderLayout.NORTH);
 
-                JButton pickBtn = Theme.button("CHOOSE", Theme.ButtonStyle.RED);
-                pickBtn.addActionListener(ev -> {
-                    gamePanel.applyChosenPerk(perk);
-                    dlg.dispose();
-                });
-                card.add(pickBtn, BorderLayout.SOUTH);
-                grid.add(card);
-            }
-            root.add(grid, BorderLayout.CENTER);
-            dlg.setContentPane(root);
-            dlg.pack();
-            dlg.setResizable(false);
-            dlg.setLocationRelativeTo(this);
-            dlg.setVisible(true);
-        } finally {
-            dialogOpen = false;
+            JTextArea desc = new JTextArea(perk.description);
+            desc.setEditable(false);
+            desc.setLineWrap(true);
+            desc.setWrapStyleWord(true);
+            desc.setOpaque(false);
+            desc.setFont(Theme.font(Font.PLAIN, 13));
+            desc.setForeground(Theme.PAPER_TEXT);
+            card.add(desc, BorderLayout.CENTER);
+
+            JButton pickBtn = Theme.button("CHOOSE", Theme.ButtonStyle.RED);
+            pickBtn.addActionListener(ev -> {
+                gamePanel.applyChosenPerk(perk);
+                dlg.dispose();
+            });
+            card.add(pickBtn, BorderLayout.SOUTH);
+            grid.add(card);
         }
-        if (closed) {
-            return;
-        }
-        if (!wasPaused) {
-            gamePanel.resumeGame();
-        }
-        refreshHud();
-        gamePanel.requestFocusInWindow();
+        root.add(grid, BorderLayout.CENTER);
+        dlg.setContentPane(root);
+        dlg.pack();
+        dlg.setResizable(false);
+        dlg.setLocationRelativeTo(this);
+        dlg.setVisible(true);
     }
 
     /** Opens the chamber Field Merchant offering 3 random items (Heal, 1-Chamber Weapon, Tactical Perk). */
@@ -567,101 +559,90 @@ public final class GameFrame extends JFrame implements ActionListener {
             return;
         }
         List<GamePanel.FieldShopOffer> offers = gamePanel.getFieldShopOffers();
-        dialogOpen = true;
-        boolean wasPaused = gamePanel.isPaused();
-        gamePanel.pauseGame();
-        try {
-            JDialog dlg = new JDialog(this, "Field Merchant - Chamber " + gamePanel.getChamber(), true);
-            JPanel root = new JPanel(new BorderLayout(0, 12));
-            root.setBackground(Theme.BG);
-            root.setBorder(new EmptyBorder(16, 20, 16, 20));
+        showPausedDialog(() -> showFieldShop(offers));
+    }
 
-            Player p = gamePanel.getPlayer();
-            Theme.PixelLabel header = new Theme.PixelLabel(
-                    "FIELD MERCHANT - 3 RANDOM OFFERS (CH " + gamePanel.getChamber() + ")", 3, Theme.GOLD);
-            header.setShadow(true);
-            Theme.PixelLabel scrapsLabel = new Theme.PixelLabel(
-                    "SCRAPS: " + p.getItemCount(GameData.ItemType.SCRAPS)
-                            + "  |  HP: " + p.getHp() + "/" + p.getMaxHp(), 2, Theme.TEXT);
-            JPanel top = Theme.transparentPanel(new BorderLayout(0, 6));
-            top.add(centred(header), BorderLayout.NORTH);
-            top.add(centred(scrapsLabel), BorderLayout.SOUTH);
-            root.add(top, BorderLayout.NORTH);
+    private void showFieldShop(List<GamePanel.FieldShopOffer> offers) {
+        JDialog dlg = new JDialog(this, "Field Merchant - Chamber " + gamePanel.getChamber(), true);
+        JPanel root = new JPanel(new BorderLayout(0, 12));
+        root.setBackground(Theme.BG);
+        root.setBorder(new EmptyBorder(16, 20, 16, 20));
 
-            JLabel feedbackLabel = Theme.label(
-                    "Pick any offer using Scraps. Temporary weapons vanish when entering the next chamber.",
-                    Font.PLAIN, 13, Theme.TEXT_2);
-            JPanel grid = Theme.transparentPanel(new GridLayout(1, Math.max(1, offers.size()), 12, 0));
-            for (int i = 0; i < offers.size(); i++) {
-                final int idx = i;
-                GamePanel.FieldShopOffer offer = offers.get(i);
-                Theme.Card card = new Theme.Card(new BorderLayout(0, 8), Theme.Panel.PAPER);
-                card.setPreferredSize(new Dimension(238, 226));
+        Player p = gamePanel.getPlayer();
+        Theme.PixelLabel header = new Theme.PixelLabel(
+                "FIELD MERCHANT - 3 RANDOM OFFERS (CH " + gamePanel.getChamber() + ")", 3, Theme.GOLD);
+        header.setShadow(true);
+        Theme.PixelLabel scrapsLabel = new Theme.PixelLabel(
+                "SCRAPS: " + p.getItemCount(GameData.ItemType.SCRAPS)
+                        + "  |  HP: " + p.getHp() + "/" + p.getMaxHp(), 2, Theme.TEXT);
+        JPanel top = Theme.transparentPanel(new BorderLayout(0, 6));
+        top.add(centred(header), BorderLayout.NORTH);
+        top.add(centred(scrapsLabel), BorderLayout.SOUTH);
+        root.add(top, BorderLayout.NORTH);
 
-                String kindTag = offer.kind == GamePanel.FieldShopOffer.OfferKind.HEAL ? "FIELD RECOVERY"
-                        : offer.kind == GamePanel.FieldShopOffer.OfferKind.TEMP_WEAPON ? "TEMP WEAPON (1 CH)"
-                        : "TACTICAL PERK";
-                Color kindCol = offer.kind == GamePanel.FieldShopOffer.OfferKind.HEAL ? Theme.DARK_GREEN
-                        : offer.kind == GamePanel.FieldShopOffer.OfferKind.TEMP_WEAPON ? Theme.DARK_RED
-                        : new Color(0x7A4B00);
-                Theme.PixelLabel kindLbl = new Theme.PixelLabel(kindTag, 2, kindCol);
-                Theme.PixelLabel titleLbl = new Theme.PixelLabel(offer.title.toUpperCase(), 2, Theme.PAPER_TEXT);
-                JPanel head = Theme.transparentPanel(new BorderLayout(0, 4));
-                head.add(kindLbl, BorderLayout.NORTH);
-                head.add(titleLbl, BorderLayout.SOUTH);
-                card.add(head, BorderLayout.NORTH);
+        JLabel feedbackLabel = Theme.label(
+                "Pick any offer using Scraps. Temporary weapons vanish when entering the next chamber.",
+                Font.PLAIN, 13, Theme.TEXT_2);
+        JPanel grid = Theme.transparentPanel(new GridLayout(1, Math.max(1, offers.size()), 12, 0));
+        for (int i = 0; i < offers.size(); i++) {
+            final int idx = i;
+            GamePanel.FieldShopOffer offer = offers.get(i);
+            Theme.Card card = new Theme.Card(new BorderLayout(0, 8), Theme.Panel.PAPER);
+            card.setPreferredSize(new Dimension(238, 226));
 
-                JTextArea desc = new JTextArea(offer.detail);
-                desc.setEditable(false);
-                desc.setLineWrap(true);
-                desc.setWrapStyleWord(true);
-                desc.setOpaque(false);
-                desc.setFont(Theme.font(Font.PLAIN, 13));
-                desc.setForeground(Theme.PAPER_TEXT);
-                card.add(desc, BorderLayout.CENTER);
+            String kindTag = offer.kind == GamePanel.FieldShopOffer.OfferKind.HEAL ? "FIELD RECOVERY"
+                    : offer.kind == GamePanel.FieldShopOffer.OfferKind.TEMP_WEAPON ? "TEMP WEAPON (1 CH)"
+                    : "TACTICAL PERK";
+            Color kindCol = offer.kind == GamePanel.FieldShopOffer.OfferKind.HEAL ? Theme.DARK_GREEN
+                    : offer.kind == GamePanel.FieldShopOffer.OfferKind.TEMP_WEAPON ? Theme.DARK_RED
+                    : new Color(0x7A4B00);
+            Theme.PixelLabel kindLbl = new Theme.PixelLabel(kindTag, 2, kindCol);
+            Theme.PixelLabel titleLbl = new Theme.PixelLabel(offer.title.toUpperCase(), 2, Theme.PAPER_TEXT);
+            JPanel head = Theme.transparentPanel(new BorderLayout(0, 4));
+            head.add(kindLbl, BorderLayout.NORTH);
+            head.add(titleLbl, BorderLayout.SOUTH);
+            card.add(head, BorderLayout.NORTH);
 
-                JButton buyBtn = Theme.button(offer.sold ? "SOLD" : ("BUY - " + offer.costScraps + " SCRAPS"),
-                        offer.sold ? Theme.ButtonStyle.GREY : Theme.ButtonStyle.RED);
-                buyBtn.setEnabled(!offer.sold);
-                buyBtn.addActionListener(ev -> {
-                    String msg = gamePanel.buyFieldShopOffer(idx);
-                    feedbackLabel.setText(msg);
-                    scrapsLabel.setText("SCRAPS: " + p.getItemCount(GameData.ItemType.SCRAPS)
-                            + "  |  HP: " + p.getHp() + "/" + p.getMaxHp());
-                    if (offer.sold) {
-                        buyBtn.setText("SOLD");
-                        buyBtn.setEnabled(false);
-                    }
-                    refreshHud();
-                });
-                card.add(buyBtn, BorderLayout.SOUTH);
-                grid.add(card);
-            }
-            root.add(grid, BorderLayout.CENTER);
+            JTextArea desc = new JTextArea(offer.detail);
+            desc.setEditable(false);
+            desc.setLineWrap(true);
+            desc.setWrapStyleWord(true);
+            desc.setOpaque(false);
+            desc.setFont(Theme.font(Font.PLAIN, 13));
+            desc.setForeground(Theme.PAPER_TEXT);
+            card.add(desc, BorderLayout.CENTER);
 
-            JButton closeBtn = Theme.button("CLOSE", Theme.ButtonStyle.GREY);
-            closeBtn.addActionListener(ev -> dlg.dispose());
-            JPanel bottom = Theme.transparentPanel(new BorderLayout(0, 8));
-            bottom.add(centred(feedbackLabel), BorderLayout.NORTH);
-            bottom.add(centred(closeBtn), BorderLayout.SOUTH);
-            root.add(bottom, BorderLayout.SOUTH);
-
-            dlg.setContentPane(root);
-            dlg.pack();
-            dlg.setResizable(false);
-            dlg.setLocationRelativeTo(this);
-            dlg.setVisible(true);
-        } finally {
-            dialogOpen = false;
+            JButton buyBtn = Theme.button(offer.sold ? "SOLD" : ("BUY - " + offer.costScraps + " SCRAPS"),
+                    offer.sold ? Theme.ButtonStyle.GREY : Theme.ButtonStyle.RED);
+            buyBtn.setEnabled(!offer.sold);
+            buyBtn.addActionListener(ev -> {
+                String msg = gamePanel.buyFieldShopOffer(idx);
+                feedbackLabel.setText(msg);
+                scrapsLabel.setText("SCRAPS: " + p.getItemCount(GameData.ItemType.SCRAPS)
+                        + "  |  HP: " + p.getHp() + "/" + p.getMaxHp());
+                if (offer.sold) {
+                    buyBtn.setText("SOLD");
+                    buyBtn.setEnabled(false);
+                }
+                refreshHud();
+            });
+            card.add(buyBtn, BorderLayout.SOUTH);
+            grid.add(card);
         }
-        if (closed) {
-            return;
-        }
-        if (!wasPaused) {
-            gamePanel.resumeGame();
-        }
-        refreshHud();
-        gamePanel.requestFocusInWindow();
+        root.add(grid, BorderLayout.CENTER);
+
+        JButton closeBtn = Theme.button("CLOSE", Theme.ButtonStyle.GREY);
+        closeBtn.addActionListener(ev -> dlg.dispose());
+        JPanel bottom = Theme.transparentPanel(new BorderLayout(0, 8));
+        bottom.add(centred(feedbackLabel), BorderLayout.NORTH);
+        bottom.add(centred(closeBtn), BorderLayout.SOUTH);
+        root.add(bottom, BorderLayout.SOUTH);
+
+        dlg.setContentPane(root);
+        dlg.pack();
+        dlg.setResizable(false);
+        dlg.setLocationRelativeTo(this);
+        dlg.setVisible(true);
     }
 
     // ------------------------------------------------------------------ end of the run
@@ -691,7 +672,7 @@ public final class GameFrame extends JFrame implements ActionListener {
             {"Highest Chamber", entry.wave + (entry.wave >= 15 ? " (CLEARED ACT 3)" : " / 15")},
             {"Infected killed", String.valueOf(entry.kills)},
             {"Permanent Salvage", salvageSummary},
-            {"Survival time", formatTime(entry.seconds)},
+            {"Survival time", GameData.formatRunTime(entry.seconds)},
             {"Run #", String.valueOf(gamePanel.getRunNumber())}
         };
         boolean backToCamp = Theme.ask(this, Theme.Panel.METAL, survived ? "titles/survived" : "titles/game_over",

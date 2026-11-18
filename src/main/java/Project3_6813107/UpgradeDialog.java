@@ -283,8 +283,9 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
             showFeedback(result, Theme.DARK_GREEN);
             trader.setMessage("Done! " + shortName(recipe) + " is unlocked permanently. Anything else?");
         } else {
-            showFeedback(capitalize(explainWhyNot(recipe)) + ".", Theme.DARK_RED);
-            trader.setMessage("Not enough salvage yet: " + explainWhyNot(recipe) + ".");
+            String reason = explainWhyNot(recipe);
+            showFeedback(capitalize(reason) + ".", Theme.DARK_RED);
+            trader.setMessage("Not enough salvage yet: " + reason + ".");
         }
     }
 
@@ -573,11 +574,11 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         @Override
         public Object getValueAt(int row, int column) {
             GameData.UpgradeRecipe r = GameData.RECIPES.get(row);
-            switch (column) {
-                case 0: return shortName(r);
-                case 1: return player.getCost(r);
-                default: return statusText(r);
-            }
+            return switch (column) {
+                case 0 -> shortName(r);
+                case 1 -> player.getCost(r);
+                default -> statusText(r);
+            };
         }
     }
 
