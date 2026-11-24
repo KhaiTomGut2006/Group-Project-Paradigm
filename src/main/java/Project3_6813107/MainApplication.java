@@ -48,65 +48,47 @@ import javax.swing.Timer;
 import javax.swing.border.EmptyBorder;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
-import javax.swing.event.DocumentEvent;
-import javax.swing.event.DocumentListener;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 
 /**
- * The launcher (first window), drawn with the Hollow Creek UI kit. Left: the real camp of the
- * chosen map with your survivor, the title and the crew. Right: four tabs - PLAY (name, class,
- * weapon, map, difficulty), OPTIONS (gameplay and audio check boxes, volume), SCORES (high-score
- * table) and HELP (how to play) - and the QUIT / START buttons. START opens the GameFrame.
+ * Entry-point launcher window (900x620): animated camp preview + group members on the left,
+ * tabbed Play / Options / Scores / Help controls on the right. Launches GameFrame on Start.
  *
- * Event handlers presented in class:
- *   actionPerformed(ActionEvent) - buttons, tabs, class buttons, check boxes, combo boxes, name field, animation timer
- *   stateChanged(ChangeEvent)    - the difficulty and volume JSliders
+ * Event handlers:
+ *   actionPerformed(ActionEvent) - Start/Quit, tabs, 5 class radios, 5 check boxes, map combo, name field, timer
+ *   stateChanged(ChangeEvent)    - difficulty and volume JSliders
  */
 public final class MainApplication extends JFrame implements ActionListener, ChangeListener {
 
     private static final long serialVersionUID = 1L;
-
-    private static final int MAX_NAME_LENGTH = 16;
-    // the name is written into the score file, so only plain characters are allowed
+    private static final int MAX_NAME_LENGTH = 16, ANIMATION_MS = 32, TOP_SCORES = 10, HERO_WIDTH = 340;
     private static final String NAME_PATTERN = "[A-Za-z0-9 _.-]+";
     private static final String NAME_HINT = "Letters, digits, space, - _ .  (max " + MAX_NAME_LENGTH + ")";
     private static final String[] DIFFICULTY_NAMES = {"Rookie", "Survivor", "Veteran", "Hardened", "Nightmare"};
     private static final String[] TAB_NAMES = {"Play", "Options", "Scores", "Help"};
-    private static final int ANIMATION_MS = 32;       // the camp picture advances 2 game ticks (16 ms) per timer tick
-    private static final int TOP_SCORES = 10;
-    private static final int HERO_WIDTH = 340;
 
-    // ---- play tab
+    // ---- Play tab components
     private Theme.KitField nameField;
-    private JLabel nameHintLabel;
+    private JLabel nameHintLabel, difficultyInfoLabel;
     private JRadioButton[] classRadios = new JRadioButton[GameData.PlayerClass.values().length];
     private final ButtonGroup classGroup = new ButtonGroup();
-    private JTextArea classInfoArea;
+    private JTextArea classInfoArea, mapInfoArea, howToArea;
     private JComboBox<GameData.MapType> mapCombo;
-    private JTextArea mapInfoArea;
-    private JSlider difficultySlider;
-    private Theme.PixelLabel difficultyValueLabel;
-    private JLabel difficultyInfoLabel;
+    private JSlider difficultySlider, volumeSlider;
+    private Theme.PixelLabel difficultyValueLabel, volumeValueLabel;
 
-    // ---- options tab
+    // ---- Options tab components
     private JCheckBox autoFireBox, doubleSpawnBox, hitboxBox, soundBox, musicBox;
-    private JSlider volumeSlider;
-    private Theme.PixelLabel volumeValueLabel;
 
-    // ---- tabs, scores, help, buttons
+    // ---- Navigation, Scores & Animation
     private final JToggleButton[] tabButtons = new JToggleButton[TAB_NAMES.length];
-    private final CardLayout tabCards = new CardLayout();
-    private final JPanel tabPages = Theme.transparentPanel(tabCards);
+    private final CardLayout tabCards = new CardLayout(), scoreCards = new CardLayout();
+    private final JPanel tabPages = Theme.transparentPanel(tabCards), scorePages = Theme.transparentPanel(scoreCards);
     private ScoreTableModel scoreTableModel;
-    private final CardLayout scoreCards = new CardLayout();
-    private final JPanel scorePages = Theme.transparentPanel(scoreCards);
-    private JTextArea howToArea;
     private JButton startButton, quitButton;
-
-    private HeroPanel heroPanel;
+    private final HeroPanel heroPanel;
     private final Timer animationTimer = new Timer(ANIMATION_MS, this);
-    // GameMap is not Serializable; the launcher is never serialized
     private final transient Map<GameData.MapType, GameMap> mapCache = new EnumMap<>(GameData.MapType.class);
 
     public MainApplication() {
@@ -121,7 +103,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         setContentPane(root);
         getRootPane().setCursor(Theme.arrowCursor());
 
-        // show the starting selection everywhere before the window appears
         showClassInfo();
         showMapInfo();
         showVolume();
@@ -134,8 +115,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         setLocationRelativeTo(null);
     }
 
-    // ================================================================== layout: left side
-    /** The camp picture with the pixel-font title on top and the crew (names + IDs) at the bottom. */
+    // ================================================================== left side (preview + group names)
     private HeroPanel buildHeroPanel() {
         HeroPanel hero = new HeroPanel();
         hero.setPreferredSize(new Dimension(HERO_WIDTH, 10));
@@ -150,9 +130,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
         JPanel crew = Theme.transparentPanel(new GridLayout(0, 1, 0, 4));
         crew.add(Theme.row(0, Theme.caption("Crew")));
-        for (String member : GameData.GROUP_MEMBERS) {
-            crew.add(buildMemberRow(member));
-        }
+        for (String member : GameData.GROUP_MEMBERS) crew.add(buildMemberRow(member));
         hero.add(crew, BorderLayout.SOUTH);
         return hero;
     }
@@ -163,7 +141,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return label;
     }
 
-    /** "Tapatsawin Chaieua   6813105" -> name on the left, student ID on the right. */
     private static JPanel buildMemberRow(String member) {
         String text = member.trim();
         int split = text.lastIndexOf(' ');
@@ -177,8 +154,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return row;
     }
 
-    // ================================================================== layout: right side
-    /** Tab buttons on top, the selected page on a kit panel, QUIT / START at the bottom. */
+    // ================================================================== right side (tabs + pages + Start/Quit)
     private JPanel buildRightColumn() {
         JPanel column = Theme.transparentPanel(new BorderLayout(0, 14));
         column.setBorder(new EmptyBorder(24, 26, 20, 26));
@@ -190,22 +166,21 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         tabPages.add(buildHelpPage(), TAB_NAMES[3]);
         column.add(tabPages, BorderLayout.CENTER);
 
-        quitButton = Theme.button("Quit", Theme.ButtonStyle.RED);       // the kit's ready-made QUIT button
+        quitButton = Theme.button("Quit", Theme.ButtonStyle.RED);
         quitButton.addActionListener(this);
-        startButton = Theme.button("Start", Theme.ButtonStyle.RED);     // the kit's START button, drawn 3x
+        startButton = Theme.button("Start", Theme.ButtonStyle.RED);
         Theme.setButtonScale(startButton, 3);
         startButton.addActionListener(this);
-        getRootPane().setDefaultButton(startButton);   // Enter starts the game
-        JPanel bottom = Theme.transparentPanel(new BorderLayout());
-        JPanel quitHolder = Theme.transparentPanel(new GridBagLayout());   // keeps QUIT its own size, centred
+        getRootPane().setDefaultButton(startButton);
+        JPanel quitHolder = Theme.transparentPanel(new GridBagLayout());
         quitHolder.add(quitButton);
+        JPanel bottom = Theme.transparentPanel(new BorderLayout());
         bottom.add(quitHolder, BorderLayout.WEST);
         bottom.add(startButton, BorderLayout.EAST);
         column.add(bottom, BorderLayout.SOUTH);
         return column;
     }
 
-    /** Four toggle buttons; only one can be selected (ButtonGroup), like tabs. */
     private JComponent buildTabBar() {
         JPanel strip = Theme.transparentPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
         ButtonGroup group = new ButtonGroup();
@@ -219,29 +194,13 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return strip;
     }
 
-    /** Name, class, region and hazard level for a new run. */
     private JComponent buildPlayPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
 
         nameField = new Theme.KitField("Survivor", 16);
         nameField.addActionListener(this);
-        nameField.getDocument().addDocumentListener(new DocumentListener() {
-            @Override
-            public void insertUpdate(DocumentEvent e) {
-                clearNameError();
-            }
-
-            @Override
-            public void removeUpdate(DocumentEvent e) {
-                clearNameError();
-            }
-
-            @Override
-            public void changedUpdate(DocumentEvent e) {
-                clearNameError();
-            }
-        });
+        Theme.onEdit(nameField, this::clearNameError);
         nameHintLabel = Theme.label(NAME_HINT, Font.PLAIN, 11, Theme.TEXT_3);
         form.add(Theme.caption("Your name"), 0);
         form.add(nameField, 7);
@@ -262,14 +221,7 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(classInfoArea, 6);
 
         mapCombo = new JComboBox<>(GameData.MapType.values());
-        Theme.styleCombo(mapCombo, new Theme.ListRenderer<GameData.MapType>() {
-            private static final long serialVersionUID = 1L;
-
-            @Override
-            String textFor(GameData.MapType value) {
-                return value.displayName;
-            }
-        });
+        Theme.styleCombo(mapCombo, new Theme.ListRenderer<>());
         mapCombo.addActionListener(this);
         mapInfoArea = Theme.textBlock("", 12, Theme.TEXT_2);
         mapInfoArea.setRows(2);
@@ -291,10 +243,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(difficultySlider, 4);
         form.add(difficultyInfoLabel, 0);
         form.fillRest();
-        return onPanel(page, Theme.Panel.METAL);
+        return onPanel(page);
     }
 
-    /** Check boxes for gameplay and sound, plus the volume slider. */
     private JComponent buildOptionsPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
@@ -319,10 +270,9 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(headerWithValue("Volume", volumeValueLabel), 14);
         form.add(volumeSlider, 4);
         form.fillRest();
-        return onPanel(page, Theme.Panel.METAL);
+        return onPanel(page);
     }
 
-    /** The high-score JTable, or a short message while there are no scores yet. */
     private JComponent buildScoresPage() {
         scoreTableModel = new ScoreTableModel();
         JTable scoreTable = new JTable(scoreTableModel);
@@ -330,11 +280,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         scoreTable.setRowSelectionAllowed(false);
         scoreTable.setDefaultRenderer(Object.class, new ScoreCellRenderer());
         int[] widths = {40, 120, 140, 60, 56, 74};
-        for (int i = 0; i < widths.length; i++) {
-            scoreTable.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
-        }
+        for (int i = 0; i < widths.length; i++) scoreTable.getColumnModel().getColumn(i).setPreferredWidth(widths[i]);
 
-        JPanel empty = Theme.transparentPanel(new GridBagLayout());
         JPanel message = Theme.transparentPanel(new GridLayout(0, 1, 0, 10));
         Theme.PixelLabel title = new Theme.PixelLabel("NO RUNS YET", 3, Theme.TEXT);
         title.setAlignment(SwingConstants.CENTER);
@@ -342,14 +289,14 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         sub.setHorizontalAlignment(SwingConstants.CENTER);
         message.add(title);
         message.add(sub);
+        JPanel empty = Theme.transparentPanel(new GridBagLayout());
         empty.add(message);
 
         scorePages.add(Theme.scroll(scoreTable, Theme.PANEL), "table");
         scorePages.add(empty, "empty");
-        return onPanel(scorePages, Theme.Panel.METAL);
+        return onPanel(scorePages);
     }
 
-    /** How to play, written on the kit's paper note: goal, controls as key caps, and the Roguelite loop. */
     private JComponent buildHelpPage() {
         JPanel page = Theme.transparentPanel(new GridBagLayout());
         Form form = new Form(page);
@@ -362,7 +309,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         form.add(new Theme.PixelLabel("ROGUELITE EXPEDITION LOOP", 2, Theme.DARK_RED), 0);
         form.add(howToArea, 6);
 
-        // each row: what it does, then the keys (sprites from the Hollow Creek UI kit)
         String[][] controls = {
             {"Move", "w", "a", "s", "d"}, {"Aim, hold to fire", "mouse_left"},
             {"Dash (Dodge Traps)", "space", "shift"}, {"Enter Gate / Interact NPC", "f"},
@@ -372,12 +318,10 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         };
         JPanel keys = Theme.transparentPanel(new GridLayout(0, 2, 12, 6));
         for (String[] c : controls) {
-            String[] keyNames = Arrays.copyOfRange(c, 1, c.length);
-            keys.add(Theme.row(8, Theme.keyCaps(2, keyNames), Theme.label(c[0], Font.PLAIN, 13, Theme.PAPER_TEXT)));
+            keys.add(Theme.row(8, Theme.keyCaps(2, Arrays.copyOfRange(c, 1, c.length)), Theme.label(c[0], Font.PLAIN, 13, Theme.PAPER_TEXT)));
         }
         form.add(new Theme.PixelLabel("CONTROLS", 2, Theme.DARK_RED), 14);
         form.add(keys, 8);
-
         form.add(new Theme.PixelLabel("TRAPS, PERKS & PERMANENT SALVAGE", 2, Theme.DARK_RED), 14);
         form.add(Theme.textBlock("Spikes, Toxic Pools, Shock Pylons & Landmines hurt BOTH you and zombies - dash [SPACE] through"
                 + " hazards or lure enemies into traps! Each run carries your Knife + 1 Gun from Camp Arsenal. If you fall, 100%"
@@ -385,14 +329,13 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
                 13, Theme.PAPER_TEXT), 6);
         form.fillRest();
         Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.PAPER);
-        card.setBorder(new EmptyBorder(16, 40, 14, 22));   // clear of the paper's red margin line
+        card.setBorder(new EmptyBorder(16, 40, 14, 22));
         card.add(page, BorderLayout.CENTER);
         return card;
     }
 
-    // ---- small layout helpers
-    private static JComponent onPanel(JComponent content, Theme.Panel panel) {
-        Theme.Card card = new Theme.Card(new BorderLayout(), panel);
+    private static JComponent onPanel(JComponent content) {
+        Theme.Card card = new Theme.Card(new BorderLayout(), Theme.Panel.METAL);
         card.add(content, BorderLayout.CENTER);
         return card;
     }
@@ -421,25 +364,22 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return box;
     }
 
-    /** A kit check box with a one-line explanation under its label. */
     private static JPanel checkRow(JCheckBox box, String description) {
         JPanel row = Theme.transparentPanel(new BorderLayout(0, 0));
         row.add(box, BorderLayout.NORTH);
         JLabel text = Theme.label(description, Font.PLAIN, 12, Theme.TEXT_3);
-        text.setBorder(new EmptyBorder(0, 36, 0, 0));   // lines up with the check box's label
+        text.setBorder(new EmptyBorder(0, 36, 0, 0));
         row.add(text, BorderLayout.CENTER);
         return row;
     }
 
-    /** Stacks components top to bottom, full width, with a gap above each one. */
     private static final class Form {
         private final JPanel panel;
         private final GridBagConstraints c = new GridBagConstraints();
 
         Form(JPanel panel) {
             this.panel = panel;
-            c.gridx = 0;
-            c.gridy = 0;
+            c.gridx = c.gridy = 0;
             c.weightx = 1;
             c.fill = GridBagConstraints.HORIZONTAL;
             c.anchor = GridBagConstraints.NORTHWEST;
@@ -451,7 +391,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
             c.gridy++;
         }
 
-        /** An empty last row takes the spare height, so the content stays at the top. */
         void fillRest() {
             c.weighty = 1;
             c.insets = new Insets(0, 0, 0, 0);
@@ -460,19 +399,13 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     }
 
     // ================================================================== event handlers
-    /** Start, quit, animation, and launcher selections share this Swing listener. */
     @Override
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
-        if (source == startButton || source == nameField) {
-            startSurvival();
-        } else if (source == quitButton) {
-            quitLauncher();
-        } else if (source == animationTimer) {
-            heroPanel.tick();
-        } else {
-            updateSelection(source);
-        }
+        if (source == startButton || source == nameField) startSurvival();
+        else if (source == quitButton) quitLauncher();
+        else if (source == animationTimer) heroPanel.tick();
+        else updateSelection(source);
     }
 
     private void updateSelection(Object source) {
@@ -491,33 +424,30 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
             AssetLoader.playSound("click");
         } else if (source == soundBox) {
             AssetLoader.setSoundEnabled(soundBox.isSelected());
-            AssetLoader.playSound("click");   // only audible when it was just switched on
+            AssetLoader.playSound("click");
         } else if (source == musicBox) {
             AssetLoader.setMusicEnabled(musicBox.isSelected());
         } else if (source == hitboxBox) {
             heroPanel.setShowHitbox(hitboxBox.isSelected());
         } else if (source == doubleSpawnBox) {
-            updateDifficultyReadout();       // the spawn numbers double
+            updateDifficultyReadout();
         } else if (source == autoFireBox) {
             AssetLoader.playSound("click");
         }
     }
 
-    /** The two JSliders: difficulty updates its readout, volume is applied to the sound system live. */
     @Override
     public void stateChanged(ChangeEvent e) {
         if (e.getSource() == volumeSlider) {
-            AssetLoader.setVolume(volumeSlider.getValue());   // the launcher music gets louder/quieter at once
+            AssetLoader.setVolume(volumeSlider.getValue());
             showVolume();
-            if (!volumeSlider.getValueIsAdjusting()) {
-                AssetLoader.playSound("click");             // a sample at the new level once the knob is released
-            }
+            if (!volumeSlider.getValueIsAdjusting()) AssetLoader.playSound("click");
         } else if (e.getSource() == difficultySlider) {
             updateDifficultyReadout();
         }
     }
 
-    // ================================================================== what the handlers do
+    // ================================================================== actions & helpers
     private void selectTab(int index) {
         tabButtons[index].setSelected(true);
         tabCards.show(tabPages, TAB_NAMES[index]);
@@ -525,42 +455,22 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
 
     private GameData.PlayerClass getSelectedClass() {
         GameData.PlayerClass[] classes = GameData.PlayerClass.values();
-        for (int i = 0; i < classRadios.length; i++) {
-            if (classRadios[i].isSelected()) {
-                return classes[i];
-            }
-        }
+        for (int i = 0; i < classRadios.length; i++) if (classRadios[i].isSelected()) return classes[i];
         return GameData.PlayerClass.SCAVENGER;
     }
 
     private GameData.MapType getSelectedMap() {
-        Object item = mapCombo.getSelectedItem();
-        return item instanceof GameData.MapType ? (GameData.MapType) item : GameData.MapType.WASTELAND_HIGHWAY;
+        return mapCombo.getSelectedItem() instanceof GameData.MapType m ? m : GameData.MapType.WASTELAND_HIGHWAY;
     }
 
-    private void showClassInfo() {
-        classInfoArea.setText(getSelectedClass().description);
-        refreshHero();
-    }
-
-    private void showMapInfo() {
-        mapInfoArea.setText(getSelectedMap().description);
-        refreshHero();
-    }
-
-    /** Maps are generated from a fixed seed, so one copy per type is enough (about 10-150 ms to build). */
-    private GameMap getMap(GameData.MapType type) {
-        GameMap map = mapCache.get(type);
-        if (map == null) {
-            map = new GameMap(type, type.seed);
-            mapCache.put(type, map);
-        }
-        return map;
-    }
+    private void showClassInfo() { classInfoArea.setText(getSelectedClass().description); refreshHero(); }
+    private void showMapInfo() { mapInfoArea.setText(getSelectedMap().description); refreshHero(); }
 
     private void refreshHero() {
         if (heroPanel != null && mapCombo != null) {
-            heroPanel.setScene(getMap(getSelectedMap()), getSelectedClass(), GameData.WeaponType.KNIFE);
+            GameData.MapType type = getSelectedMap();
+            GameMap map = mapCache.computeIfAbsent(type, t -> new GameMap(t, t.seed));
+            heroPanel.setScene(map, getSelectedClass(), GameData.WeaponType.KNIFE);
         }
     }
 
@@ -569,7 +479,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         volumeValueLabel.setText(v == 0 ? "MUTED" : v + "%");
     }
 
-    /** Uses the same formulas as the game (GameData) so the numbers shown are the real ones. */
     private void updateDifficultyReadout() {
         int d = difficultySlider.getValue();
         boolean doubled = doubleSpawnBox.isSelected();
@@ -580,10 +489,11 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
                 + GameData.spawnBatchSize(5, d, doubled) + " by Day 5.");
     }
 
-    /** Validates the name; on a problem it explains it under the field and puts the cursor back there. */
     private String validatePlayerName() {
         String name = nameField.getText().trim();
-        String problem = nameProblem(name);
+        String problem = name.isEmpty() ? "Please type a name first."
+                : name.length() > MAX_NAME_LENGTH ? "Too long: " + name.length() + " of max " + MAX_NAME_LENGTH + " characters."
+                : !name.matches(NAME_PATTERN) ? "Only letters, digits, space and - _ . please." : null;
         if (problem != null) {
             selectTab(0);
             nameHintLabel.setText(problem);
@@ -599,29 +509,17 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return name;
     }
 
-    private static String nameProblem(String name) {
-        if (name.isEmpty()) {
-            return "Please type a name first.";
-        }
-        if (name.length() > MAX_NAME_LENGTH) {
-            return "Too long: " + name.length() + " of max " + MAX_NAME_LENGTH + " characters.";
-        }
-        if (!name.matches(NAME_PATTERN)) {
-            return "Only letters, digits, space and - _ . please.";
-        }
-        return null;
-    }
-
     private void clearNameError() {
         nameHintLabel.setText(NAME_HINT);
         nameHintLabel.setForeground(Theme.TEXT_3);
         nameField.setError(false);
     }
 
-    /** Collects every control into the settings object the game reads. */
-    private GameData.GameSettings buildSettings(String playerName) {
+    private void startSurvival() {
+        String name = validatePlayerName();
+        if (name == null) return;
         GameData.GameSettings s = new GameData.GameSettings();
-        s.playerName = playerName;
+        s.playerName = name;
         s.playerClass = getSelectedClass();
         s.startWeapon = GameData.WeaponType.KNIFE;
         s.map = getSelectedMap();
@@ -632,23 +530,15 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         s.soundOn = soundBox.isSelected();
         s.musicOn = musicBox.isSelected();
         s.doubleSpawn = doubleSpawnBox.isSelected();
-        return s;
-    }
 
-    private void startSurvival() {
-        String name = validatePlayerName();
-        if (name == null) {
-            return;
-        }
-        GameData.GameSettings settings = buildSettings(name);
         AssetLoader.playSound("click");
-        hideLauncher();
+        animationTimer.stop();
+        AssetLoader.stopMusic();
+        setVisible(false);
         try {
-            new GameFrame(settings, this);   // GameFrame shows itself and calls onGameFinished() at the end
+            new GameFrame(s, this);
         } catch (RuntimeException ex) {
-            // never leave the user with no window at all
-            JOptionPane.showMessageDialog(null, "The game could not start:\n" + ex, "Last Camp Survivor",
-                    JOptionPane.ERROR_MESSAGE);
+            JOptionPane.showMessageDialog(null, "The game could not start:\n" + ex, "Last Camp Survivor", JOptionPane.ERROR_MESSAGE);
             showLauncher();
         }
     }
@@ -660,9 +550,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         System.exit(0);
     }
 
-    /** Shows the launcher with its animation and music running. */
     public void showLauncher() {
-        AssetLoader.setVolume(volumeSlider.getValue());   // the game may have changed the sound settings
+        AssetLoader.setVolume(volumeSlider.getValue());
         AssetLoader.setSoundEnabled(soundBox.isSelected());
         AssetLoader.setMusicEnabled(musicBox.isSelected());
         setVisible(true);
@@ -671,23 +560,13 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         AssetLoader.playMusic("bgm");
     }
 
-    /** Hides the launcher; the animation timer and the music stop with it. */
-    private void hideLauncher() {
-        animationTimer.stop();
-        AssetLoader.stopMusic();
-        setVisible(false);
-    }
-
-    /** Called by GameFrame when a run ends or its window closes: back to the launcher with fresh scores. */
     public void onGameFinished() {
         if (!SwingUtilities.isEventDispatchThread()) {
             SwingUtilities.invokeLater(this::onGameFinished);
             return;
         }
         reloadHighScores();
-        if (scoreTableModel.getRowCount() > 0) {
-            selectTab(2);   // show where the run just landed
-        }
+        if (scoreTableModel.getRowCount() > 0) selectTab(2);
         showLauncher();
     }
 
@@ -697,11 +576,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         scoreCards.show(scorePages, all.isEmpty() ? "empty" : "table");
     }
 
-    private static String formatTime(int seconds) {
-        return (seconds / 60) + ":" + String.format("%02d", seconds % 60);
-    }
-
-    // ================================================================== entry point
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> {
             Theme.installLookAndFeel();
@@ -710,10 +584,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     }
 
     // ================================================================== helper classes
-    /**
-     * The high-score JTable's data: top runs, read-only (AbstractTableModel cells are not editable).
-     * A leading "#" in a column name tells the kit header to right-align it.
-     */
     private static final class ScoreTableModel extends AbstractTableModel {
         private static final long serialVersionUID = 1L;
         private static final String[] COLUMNS = {"NO.", "SURVIVOR", "REGION", "#CHAMBER", "#KILLS", "#TIME"};
@@ -725,71 +595,44 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
             fireTableDataChanged();
         }
 
-        @Override
-        public int getRowCount() {
-            return rows.size();
-        }
-
-        @Override
-        public int getColumnCount() {
-            return COLUMNS.length;
-        }
-
-        @Override
-        public String getColumnName(int column) {
-            return COLUMNS[column];
-        }
+        @Override public int getRowCount() { return rows.size(); }
+        @Override public int getColumnCount() { return COLUMNS.length; }
+        @Override public String getColumnName(int column) { return COLUMNS[column]; }
 
         @Override
         public Object getValueAt(int row, int column) {
             GameData.ScoreEntry e = rows.get(row);
-            switch (column) {
-                case 0: return row + 1;
-                case 1: return e.name;
-                case 2: return e.map;
-                case 3: return e.wave;
-                case 4: return e.kills;
-                default: return formatTime(e.seconds);
-            }
+            return switch (column) {
+                case 0 -> row + 1;
+                case 1 -> e.name;
+                case 2 -> e.map;
+                case 3 -> e.wave;
+                case 4 -> e.kills;
+                default -> GameData.formatRunTime(e.seconds);
+            };
         }
     }
 
-    /** Top three ranks in gold, the score in bold, numbers right-aligned, a dark line between rows. */
     private static final class ScoreCellRenderer extends DefaultTableCellRenderer {
         private static final long serialVersionUID = 1L;
 
         @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
-                                                       boolean focused, int row, int column) {
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean selected, boolean focused, int row, int column) {
             super.getTableCellRendererComponent(table, value, false, false, row, column);
             setHorizontalAlignment(column >= 3 ? SwingConstants.RIGHT : SwingConstants.LEFT);
-            setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, Theme.SLOT),
-                    new EmptyBorder(0, 12, 0, 12)));
+            setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(0, 0, 2, 0, Theme.SLOT), new EmptyBorder(0, 12, 0, 12)));
             setBackground(Theme.PANEL);
             setFont(Theme.font(column == 5 || column == 1 ? Font.BOLD : Font.PLAIN, 13));
-            if (column == 0) {
-                setForeground(row < 3 ? Theme.GOLD : Theme.TEXT_3);
-            } else {
-                setForeground(column == 1 || column == 5 ? Theme.TEXT : Theme.TEXT_2);
-            }
-            if (column == 1) {
-                setToolTipText(String.valueOf(value));
-            }
+            setForeground(column == 0 ? (row < 3 ? Theme.GOLD : Theme.TEXT_3) : (column == 1 || column == 5 ? Theme.TEXT : Theme.TEXT_2));
+            if (column == 1) setToolTipText(String.valueOf(value));
             return this;
         }
     }
 
-    /**
-     * The left side of the launcher: the real camp of the chosen map (ground, props, animated
-     * fire and flag) with your survivor in the middle, slowly aiming around with the chosen weapon.
-     * Dark fades at the top and bottom keep the title and crew readable.
-     * The launcher's javax.swing.Timer calls tick(); it stops whenever the launcher is hidden.
-     */
     private static final class HeroPanel extends JPanel {
         private static final long serialVersionUID = 1L;
         private static final int ZOOM = 2;
-        private static final Color FADE = new Color(27, 24, 32, 240);
-        private static final Color CLEAR = new Color(27, 24, 32, 0);
+        private static final Color FADE = new Color(27, 24, 32, 240), CLEAR = new Color(27, 24, 32, 0);
         private transient GameMap map;
         private transient Player player;
         private boolean showHitbox;
@@ -812,12 +655,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
             repaint();
         }
 
-        void setShowHitbox(boolean show) {
-            showHitbox = show;
-            repaint();
-        }
+        void setShowHitbox(boolean show) { showHitbox = show; repaint(); }
 
-        /** Two game ticks per timer tick (the timer runs at 32 ms, a game tick is 16 ms). */
         void tick() {
             aimPhase += 0.03;
             step();
@@ -826,11 +665,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         }
 
         private void step() {
-            if (map == null || player == null) {
-                return;
-            }
-            map.update();   // flame barrel and flag animation
-            // the aim point circles the survivor, so the gun turns and the body flips left and right
+            if (map == null || player == null) return;
+            map.update();
             player.setAim(player.getX() + Math.cos(aimPhase) * 60, player.getY() + Math.sin(aimPhase * 2) * 20);
             player.update();
         }
@@ -838,15 +674,11 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         @Override
         protected void paintComponent(Graphics g) {
             super.paintComponent(g);
-            if (map == null || player == null) {
-                return;
-            }
+            if (map == null || player == null) return;
             Graphics2D g2 = Theme.smooth(g);
-            int w = getWidth(), h = getHeight();
-            int viewW = w / ZOOM + 1, viewH = h / ZOOM + 1;
-            // camera: survivor in the middle, a little below the centre; never past the map edge
-            int camX = clamp((int) player.getX() - viewW / 2, 0, map.getWidthPx() - viewW);
-            int camY = clamp((int) player.getY() - viewH * 11 / 20, 0, map.getHeightPx() - viewH);
+            int w = getWidth(), h = getHeight(), viewW = w / ZOOM + 1, viewH = h / ZOOM + 1;
+            int camX = clamp((int) player.getX() - viewW / 2, map.getWidthPx() - viewW);
+            int camY = clamp((int) player.getY() - viewH * 11 / 20, map.getHeightPx() - viewH);
             Rectangle view = new Rectangle(camX, camY, viewW, viewH);
 
             Graphics2D world = (Graphics2D) g2.create();
@@ -856,26 +688,18 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
             List<GameMap.Drawable> things = new ArrayList<>(map.getPropsInView(view));
             things.add(player);
             things.sort(GameMap.DEPTH_ORDER);
-            for (GameMap.Drawable d : things) {
-                d.draw(world);
-            }
-            if (showHitbox) {
-                player.drawHitbox(world);
-            }
+            for (GameMap.Drawable d : things) d.draw(world);
+            if (showHitbox) player.drawHitbox(world);
             world.dispose();
 
-            // nearly solid behind the title and the crew, clear around the survivor
             g2.setPaint(new LinearGradientPaint(0, 0, 0, h, new float[]{0f, 0.32f, 0.47f, 0.62f, 0.76f, 1f},
                     new Color[]{FADE, FADE, CLEAR, CLEAR, FADE, FADE}));
             g2.fillRect(0, 0, w, h);
-            // a dark pixel edge between the picture and the menu, like the kit's panel outlines
             g2.setColor(Theme.INK);
             g2.fillRect(w - 2 * Theme.S, 0, 2 * Theme.S, h);
             g2.dispose();
         }
 
-        private static int clamp(int v, int min, int max) {
-            return Math.max(min, Math.min(Math.max(min, max), v));
-        }
+        private static int clamp(int v, int max) { return Math.max(0, Math.min(Math.max(0, max), v)); }
     }
 }

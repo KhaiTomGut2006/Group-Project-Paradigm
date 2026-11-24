@@ -33,7 +33,6 @@ import java.awt.event.FocusEvent;
 import java.awt.event.KeyEvent;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -85,62 +84,33 @@ import javax.swing.table.JTableHeader;
 import javax.swing.table.TableCellRenderer;
 
 /**
- * The look of every window, built from the Hollow Creek UI kit (resources/ui/kit):
- * 9-slice panels (metal, paper, glass, danger), red and grey buttons in four states, check boxes,
- * sliders, bars, inventory slots, the 3x5 pixel font, key caps, cursors, portraits and titles.
- *
- * Every control is still a normal Swing component (JButton, JCheckBox, JSlider, JProgressBar ...);
- * only its painting is replaced by a small "UI" class here (Swing's pluggable look and feel).
- * The pixel art is always enlarged by whole numbers (usually 2x) with nearest-neighbour scaling,
- * so it stays sharp.
+ * Shared Swing Look-and-Feel built around the Hollow Creek UI Kit (resources/ui/kit):
+ * 9-slice panels, kit buttons, check boxes, sliders, bars, slots, cursors, and 3x5 pixel font.
  */
 final class Theme {
 
-    // ------------------------------------------------------------------ colours (sampled from the kit)
-    static final Color INK = new Color(0x16121A);        // outlines, darkest
-    static final Color BG = new Color(0x1B1820);         // window background
-    static final Color PANEL = new Color(0x2A282F);      // inside of the metal panel
-    static final Color SLOT = new Color(0x24232B);       // inside of slots, fields and table rows
-    static final Color GREY_1 = new Color(0x3B3942);
-    static final Color GREY_2 = new Color(0x55525D);
-    static final Color GREY_3 = new Color(0x77737E);
-    static final Color TEXT = new Color(0xF0E6C0);       // cream
-    static final Color TEXT_2 = new Color(0xB3AB98);     // muted cream
-    static final Color TEXT_3 = new Color(0x77737E);     // captions, disabled
-    static final Color PAPER_TEXT = new Color(0x3B3942); // ink on the paper panel
-    static final Color GOLD = new Color(0xD8BF5C);
-    static final Color RED = new Color(0xD05A48);
-    static final Color DARK_RED = new Color(0x922628);
-    static final Color GREEN = new Color(0x7AB040);
-    static final Color DARK_GREEN = new Color(0x4A7A2A);
-    static final Color ORANGE = new Color(0xE88A30);
+    static final Color INK = new Color(0x16121A), BG = new Color(0x1B1820), PANEL = new Color(0x2A282F);
+    static final Color SLOT = new Color(0x24232B), GREY_1 = new Color(0x3B3942), GREY_2 = new Color(0x55525D);
+    static final Color GREY_3 = new Color(0x77737E), TEXT = new Color(0xF0E6C0), TEXT_2 = new Color(0xB3AB98);
+    static final Color TEXT_3 = new Color(0x77737E), PAPER_TEXT = new Color(0x3B3942), GOLD = new Color(0xD8BF5C);
+    static final Color RED = new Color(0xD05A48), DARK_RED = new Color(0x922628);
+    static final Color GREEN = new Color(0x7AB040), DARK_GREEN = new Color(0x4A7A2A);
 
-    static final int S = 2;                       // the kit is drawn at 2x everywhere
-    static final int BUTTON_HEIGHT = 16 * S;      // kit buttons are 16 px tall
-    static final int SLOT_SIZE = 20 * S;          // kit inventory slots are 20 x 20
-
-    /** Client property: a key-cap sprite ("b", "esc", "enter" ...) drawn inside a button after its text. */
-    static final String KEY_HINT = "kit.keyHint";
-    /** Client property: Integer scale for one button (default 2), e.g. 3 for the big START button. */
-    static final String BUTTON_SCALE = "kit.scale";
+    static final int S = 2, SLOT_SIZE = 20 * S;
+    static final String KEY_HINT = "kit.keyHint", BUTTON_SCALE = "kit.scale";
 
     private static final String FAMILY = pickFontFamily();
     private static boolean lookAndFeelInstalled;
 
-    private Theme() {
-    }
+    private Theme() {}
 
-    // ================================================================== fonts
-    /** Body text (descriptions, names): Segoe UI on Windows, Helvetica Neue on macOS, else SansSerif. */
+    // ================================================================== fonts & kit sprites
     private static String pickFontFamily() {
-        String[] preferred = {"Segoe UI", "Helvetica Neue", "Arial"};
         try {
-            Set<String> available = new HashSet<>(Arrays.asList(
+            Set<String> available = new HashSet<>(List.of(
                     GraphicsEnvironment.getLocalGraphicsEnvironment().getAvailableFontFamilyNames()));
-            for (String family : preferred) {
-                if (available.contains(family)) {
-                    return family;
-                }
+            for (String family : new String[]{"Segoe UI", "Helvetica Neue", "Arial"}) {
+                if (available.contains(family)) return family;
             }
         } catch (RuntimeException ex) {
             System.err.println("Font list not available: " + ex.getMessage());
@@ -148,14 +118,10 @@ final class Theme {
         return Font.SANS_SERIF;
     }
 
-    static Font font(int style, int size) {
-        return new Font(FAMILY, style, size);
-    }
+    static Font font(int style, int size) { return new Font(FAMILY, style, size); }
 
-    // ================================================================== kit images
     private static final Map<String, BufferedImage> KIT_CACHE = new HashMap<>();
 
-    /** A kit sprite such as "titles/paused" (no .png), enlarged by a whole factor. */
     static synchronized BufferedImage kit(String path, int factor) {
         String key = path + "@" + factor;
         BufferedImage img = KIT_CACHE.get(key);
@@ -167,43 +133,34 @@ final class Theme {
         return img;
     }
 
-    // Keys that have a sprite. B, G, P and "1-8" were drawn with the kit's own pixel font
-    // (dev-tools/asset-tools/MakeKeys.java); everything else is the kit's original art.
     private static final Map<String, String> KEY_SPRITES = new HashMap<>();
     static {
-        String[] letters = {"W", "A", "S", "D", "E", "F", "Q", "R", "B", "G", "P", "1", "2", "3", "4", "5"};
-        for (String k : letters) {
+        for (String k : new String[]{"W", "A", "S", "D", "E", "F", "Q", "R", "B", "G", "P", "1", "2", "3", "4", "5"}) {
             KEY_SPRITES.put(k.toLowerCase(), "keys/key_" + k);
         }
         for (String k : new String[]{"esc", "enter", "tab", "ctrl", "shift", "space", "1to8"}) {
             KEY_SPRITES.put(k, "keys/key_" + k);
         }
-        for (String k : new String[]{"mouse_left", "mouse_mid", "mouse_right"}) {
-            KEY_SPRITES.put(k, "keys/" + k);
-        }
+        for (String k : new String[]{"mouse_left", "mouse_mid", "mouse_right"}) KEY_SPRITES.put(k, "keys/" + k);
     }
 
-    /** The key-cap sprite for "w", "esc", "mouse_left" ... or null when the kit has none. */
     static BufferedImage keySprite(String key, int factor) {
         String path = KEY_SPRITES.get(key.toLowerCase());
         return path == null ? null : kit(path, factor);
     }
 
-    /** A row of key-cap sprites, e.g. keyCaps(2, "w", "a", "s", "d"). */
     static JPanel keyCaps(int factor, String... keys) {
         JPanel panel = transparentPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         for (String key : keys) {
             BufferedImage sprite = keySprite(key, factor);
-            if (sprite != null) {
-                panel.add(new JLabel(new ImageIcon(sprite)));
-            }
+            if (sprite != null) panel.add(new JLabel(new ImageIcon(sprite)));
         }
         return panel;
     }
 
-    // ================================================================== pixel font (font/hollow_creek_font_3x5.png)
+    // ================================================================== 3x5 pixel font
     private static final String GLYPHS = " !$%&+-./0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    private static boolean[][][] glyphMasks;   // [glyph][row][column]
+    private static boolean[][][] glyphMasks;
 
     private static synchronized boolean[][][] glyphs() {
         if (glyphMasks == null) {
@@ -211,8 +168,7 @@ final class Theme {
             glyphMasks = new boolean[GLYPHS.length()][5][];
             for (int i = 0; i < GLYPHS.length(); i++) {
                 char c = GLYPHS.charAt(i);
-                int width = c == 'M' || c == 'W' ? 5 : 3;
-                int gx = (i % 16) * 6, gy = (i / 16) * 6;
+                int width = (c == 'M' || c == 'W') ? 5 : 3, gx = (i % 16) * 6, gy = (i / 16) * 6;
                 for (int row = 0; row < 5; row++) {
                     glyphMasks[i][row] = new boolean[width];
                     for (int col = 0; col < width; col++) {
@@ -226,17 +182,12 @@ final class Theme {
         return glyphMasks;
     }
 
-    /** The font only has capitals, digits and a few signs: other characters are mapped or dropped. */
     private static int glyphIndex(char c) {
         char u = Character.toUpperCase(c);
-        if (u == ',') {
-            u = '.';
-        } else if (u == '_' || u == '>' || u == '<') {
-            u = '-';
-        } else if (u == '*') {
-            u = '+';
-        }
-        return GLYPHS.indexOf(u);   // -1 = not in the font
+        if (u == ',') u = '.';
+        else if (u == '_' || u == '>' || u == '<') u = '-';
+        else if (u == '*') u = '+';
+        return GLYPHS.indexOf(u);
     }
 
     static int pixelWidth(String text, int scale) {
@@ -244,47 +195,37 @@ final class Theme {
         int w = 0;
         for (int i = 0; i < text.length(); i++) {
             int index = glyphIndex(text.charAt(i));
-            if (index >= 0) {
-                w += (g[index][0].length + 1) * scale;
-            }
+            if (index >= 0) w += (g[index][0].length + 1) * scale;
         }
         return Math.max(0, w - scale);
     }
 
-    /** Draws text in the kit's pixel font with its top-left corner at x, y. */
     static void drawPixelText(Graphics2D g2, String text, int x, int y, int scale, Color color) {
         boolean[][][] g = glyphs();
         g2.setColor(color);
         int cx = x;
         for (int i = 0; i < text.length(); i++) {
             int index = glyphIndex(text.charAt(i));
-            if (index < 0) {
-                continue;
-            }
+            if (index < 0) continue;
             boolean[][] mask = g[index];
             for (int row = 0; row < 5; row++) {
                 for (int col = 0; col < mask[row].length; col++) {
-                    if (mask[row][col]) {
-                        g2.fillRect(cx + col * scale, y + row * scale, scale, scale);
-                    }
+                    if (mask[row][col]) g2.fillRect(cx + col * scale, y + row * scale, scale, scale);
                 }
             }
             cx += (mask[0].length + 1) * scale;
         }
     }
 
-    /** Pixel text with a dark drop shadow, readable on top of the game world. */
     static void drawPixelTextShadow(Graphics2D g2, String text, int x, int y, int scale, Color color) {
-        drawPixelText(g2, text, x + Math.max(1, scale / 2), y + Math.max(1, scale / 2), scale, INK);
+        int off = Math.max(1, scale / 2);
+        drawPixelText(g2, text, x + off, y + off, scale, INK);
         drawPixelText(g2, text, x, y, scale, color);
     }
 
-    // ================================================================== look and feel, cursors
-    /** Swing's cross-platform look (Metal) in the kit's colours, so popups and tooltips match. Safe to call twice. */
+    // ================================================================== LookAndFeel & cursors
     static void installLookAndFeel() {
-        if (lookAndFeelInstalled) {
-            return;
-        }
+        if (lookAndFeelInstalled) return;
         lookAndFeelInstalled = true;
         MetalLookAndFeel.setCurrentTheme(new KitMetalTheme());
         try {
@@ -302,33 +243,24 @@ final class Theme {
 
     private static final Map<String, Cursor> CURSORS = new HashMap<>();
 
-    /** One of the kit's mouse cursors ("cursor_arrow", "cursor_hand") at 2x; the normal cursor if the PC cannot. */
     static synchronized Cursor cursor(String name, int hotX, int hotY) {
-        Cursor c = CURSORS.get(name);
-        if (c == null) {
-            c = Cursor.getDefaultCursor();
+        return CURSORS.computeIfAbsent(name, key -> {
             if (!GraphicsEnvironment.isHeadless()) {
                 try {
-                    c = Toolkit.getDefaultToolkit().createCustomCursor(kit("cursors/" + name, S),
-                            new Point(hotX * S, hotY * S), name);
+                    return Toolkit.getDefaultToolkit().createCustomCursor(kit("cursors/" + key, S),
+                            new Point(hotX * S, hotY * S), key);
                 } catch (RuntimeException ex) {
                     System.err.println("Custom cursor not available: " + ex.getMessage());
                 }
             }
-            CURSORS.put(name, c);
-        }
-        return c;
+            return Cursor.getDefaultCursor();
+        });
     }
 
-    static Cursor arrowCursor() {
-        return cursor("cursor_arrow", 1, 0);
-    }
+    static Cursor arrowCursor() { return cursor("cursor_arrow", 1, 0); }
+    static Cursor handCursor() { return cursor("cursor_hand", 5, 0); }
 
-    static Cursor handCursor() {
-        return cursor("cursor_hand", 5, 0);
-    }
-
-    // ================================================================== simple components
+    // ================================================================== simple Swing helpers
     static JLabel label(String text, int style, int size, Color color) {
         JLabel label = new JLabel(text);
         label.setFont(font(style, size));
@@ -336,12 +268,8 @@ final class Theme {
         return label;
     }
 
-    /** A small pixel-font caption such as "YOUR NAME". */
-    static PixelLabel caption(String text) {
-        return new PixelLabel(text, S, TEXT_2);
-    }
+    static PixelLabel caption(String text) { return new PixelLabel(text, S, TEXT_2); }
 
-    /** Read-only wrapped text that sits on its panel (descriptions, help). */
     static JTextArea textBlock(String text, int size, Color color) {
         TextBlock area = new TextBlock(text);
         area.setEditable(false);
@@ -355,48 +283,39 @@ final class Theme {
         return area;
     }
 
-    /**
-     * A wrapped JTextArea that stays narrow before its first layout (so GridBagLayout does not stretch
-     * the column to the unwrapped line width) and revalidates when laid out at a new width.
-     */
+    static void onEdit(JTextField field, Runnable action) {
+        field.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { action.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { action.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { action.run(); }
+        });
+    }
+
     private static final class TextBlock extends JTextArea {
         private static final long serialVersionUID = 1L;
-
-        TextBlock(String text) {
-            super(text);
-        }
+        TextBlock(String text) { super(text); }
 
         @Override
         public Dimension getPreferredSize() {
             if (!isPreferredSizeSet() && getWidth() == 0 && getParent() != null) {
                 Insets in = getParent().getInsets();
                 int pw = getParent().getWidth() - in.left - in.right;
-                if (pw > 0) {
-                    super.setSize(pw, Short.MAX_VALUE);
-                }
+                if (pw > 0) super.setSize(pw, Short.MAX_VALUE);
             }
             Dimension d = super.getPreferredSize();
-            if (!isPreferredSizeSet()) {
-                return new Dimension(Math.min(100, d.width), d.height);
-            }
-            return d;
+            return !isPreferredSizeSet() ? new Dimension(Math.min(100, d.width), d.height) : d;
         }
 
-        @Override
-        public Dimension getMinimumSize() {
-            return getPreferredSize();
-        }
+        @Override public Dimension getMinimumSize() { return getPreferredSize(); }
 
         @Override
         @SuppressWarnings("deprecation")
         public void reshape(int x, int y, int w, int h) {
             super.reshape(x, y, w, h);
-            if (!isPreferredSizeSet() && w > 0 && super.getPreferredSize().height != h) {
+            if (!isPreferredSizeSet() && w > 0 && super.getPreferredSize().height != h && getParent() != null) {
                 Container p = getParent();
-                if (p != null) {
-                    p.invalidate();
-                    SwingUtilities.invokeLater(p::revalidate);
-                }
+                p.invalidate();
+                SwingUtilities.invokeLater(p::revalidate);
             }
         }
     }
@@ -409,13 +328,10 @@ final class Theme {
 
     static JPanel row(int gap, Component... parts) {
         JPanel panel = transparentPanel(new FlowLayout(FlowLayout.LEFT, gap, 0));
-        for (Component part : parts) {
-            panel.add(part);
-        }
+        for (Component part : parts) panel.add(part);
         return panel;
     }
 
-    /** Text in the kit's pixel font as a Swing component. */
     static final class PixelLabel extends JComponent {
         private static final long serialVersionUID = 1L;
         private String text;
@@ -439,22 +355,9 @@ final class Theme {
             }
         }
 
-        String getText() {
-            return text;
-        }
-
-        void setColor(Color newColor) {
-            color = newColor;
-            repaint();
-        }
-
-        void setShadow(boolean on) {
-            shadow = on;
-        }
-
-        void setAlignment(int swingConstant) {
-            align = swingConstant;
-        }
+        void setColor(Color newColor) { color = newColor; repaint(); }
+        void setShadow(boolean on) { shadow = on; }
+        void setAlignment(int swingConstant) { align = swingConstant; }
 
         @Override
         public Dimension getPreferredSize() {
@@ -462,10 +365,7 @@ final class Theme {
             return new Dimension(pixelWidth(text, scale) + extra, 5 * scale + extra);
         }
 
-        @Override
-        public Dimension getMinimumSize() {
-            return getPreferredSize();
-        }
+        @Override public Dimension getMinimumSize() { return getPreferredSize(); }
 
         @Override
         protected void paintComponent(Graphics g) {
@@ -473,26 +373,18 @@ final class Theme {
             int w = pixelWidth(text, scale);
             int x = align == SwingConstants.CENTER ? (getWidth() - w) / 2 : align == SwingConstants.RIGHT ? getWidth() - w : 0;
             int y = (getHeight() - 5 * scale) / 2;
-            if (shadow) {
-                drawPixelTextShadow(g2, text, x, y, scale, color);
-            } else {
-                drawPixelText(g2, text, x, y, scale, color);
-            }
+            if (shadow) drawPixelTextShadow(g2, text, x, y, scale, color);
+            else drawPixelText(g2, text, x, y, scale, color);
             g2.dispose();
         }
     }
 
-    // ================================================================== 9-slice painting
-    /**
-     * Draws a small kit image stretched to any size without stretching its border:
-     * the four corners are copied, the edges and the centre are tiled (or stretched).
-     * l, t, r, b are the border sizes in the image's own pixels.
-     */
+    // ================================================================== 9-slice panels
     static final class NineSlice {
         private final BufferedImage img;
         private final int l, t, r, b;
         private final boolean tile;
-        private final Color centreFill;   // null = draw the image's centre
+        private final Color centreFill;
 
         NineSlice(BufferedImage img, int l, int t, int r, int b, boolean tile, Color centreFill) {
             this.img = img;
@@ -508,15 +400,11 @@ final class Theme {
             Graphics2D g = (Graphics2D) g2.create();
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
             int iw = img.getWidth(), ih = img.getHeight();
-            int[] sx = {0, l, iw - r, iw};
-            int[] sy = {0, t, ih - b, ih};
-            int[] dx = {x, x + l * scale, x + w - r * scale, x + w};
-            int[] dy = {y, y + t * scale, y + h - b * scale, y + h};
+            int[] sx = {0, l, iw - r, iw}, sy = {0, t, ih - b, ih};
+            int[] dx = {x, x + l * scale, x + w - r * scale, x + w}, dy = {y, y + t * scale, y + h - b * scale, y + h};
             for (int row = 0; row < 3; row++) {
                 for (int col = 0; col < 3; col++) {
-                    if (dx[col + 1] <= dx[col] || dy[row + 1] <= dy[row]) {
-                        continue;
-                    }
+                    if (dx[col + 1] <= dx[col] || dy[row + 1] <= dy[row]) continue;
                     if (row == 1 && col == 1 && centreFill != null) {
                         g.setColor(centreFill);
                         g.fillRect(dx[1], dy[1], dx[2] - dx[1], dy[2] - dy[1]);
@@ -530,7 +418,6 @@ final class Theme {
             g.dispose();
         }
 
-        /** Repeats one piece of the image at its real (scaled) size, cutting the last copy short. */
         private void tilePiece(Graphics2D g, int sx1, int sy1, int sx2, int sy2, int dx1, int dy1, int dx2, int dy2, int scale) {
             int pw = (sx2 - sx1) * scale, ph = (sy2 - sy1) * scale;
             for (int y = dy1; y < dy2; y += ph) {
@@ -543,48 +430,32 @@ final class Theme {
         }
     }
 
-    /** The four kit panels. */
     enum Panel {
         METAL("metal"), PAPER("paper"), GLASS("glass"), DANGER("danger");
-
         private final String name;
-
-        Panel(String name) {
-            this.name = name;
-        }
+        Panel(String name) { this.name = name; }
 
         NineSlice slice() {
             BufferedImage raw = kit("panels/panel_" + name + "_48", 1);
-            if (this == PAPER) {
-                BufferedImage clean = copyImage(raw);
-                Graphics2D g = clean.createGraphics();
-                // replace the single tape mark on the top edge so tiling does not repeat dashes
-                g.drawImage(raw, 20, 0, 28, 3, 8, 0, 16, 3, null);
-                g.dispose();
-                // middle height 48 - 15 - 9 = 24 (exact multiple of the 6 px ruled line spacing)
-                return new NineSlice(clean, 16, 15, 16, 9, true, null);
-            }
-            if (this == DANGER) {
-                // middle size 48 - 12 - 12 = 24 (exact multiple of the 6 px diagonal stripe period)
-                return new NineSlice(raw, 12, 12, 12, 12, true, null);
-            }
-            if (this == METAL) {
-                BufferedImage clean = copyImage(raw);
-                Graphics2D g = clean.createGraphics();
-                // remove stray rust specks on the metal edges before 9-slice tiling
-                g.drawImage(raw, 45, 24, 48, 25, 45, 20, 48, 21, null);
-                g.drawImage(raw, 39, 1, 41, 2, 20, 1, 22, 2, null);
-                g.dispose();
-                return new NineSlice(clean, 16, 16, 16, 16, true, PANEL);
-            }
-            return new NineSlice(raw, 16, 16, 16, 16, true, null);
+            return switch (this) {
+                case PAPER -> new NineSlice(copyWithPatches(raw, false, 20, 0, 28, 3, 8, 0, 16, 3), 16, 15, 16, 9, true, null);
+                case DANGER -> new NineSlice(raw, 12, 12, 12, 12, true, null);
+                case METAL -> new NineSlice(copyWithPatches(raw, false, 45, 24, 48, 25, 45, 20, 48, 21,
+                        39, 1, 41, 2, 20, 1, 22, 2), 16, 16, 16, 16, true, PANEL);
+                case GLASS -> new NineSlice(raw, 16, 16, 16, 16, true, null);
+            };
         }
     }
 
-    private static BufferedImage copyImage(BufferedImage src) {
+    private static BufferedImage copyWithPatches(BufferedImage src, boolean replace, int... rects) {
         BufferedImage copy = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
         Graphics2D g = copy.createGraphics();
         g.drawImage(src, 0, 0, null);
+        if (replace) g.setComposite(AlphaComposite.Src);
+        for (int i = 0; i < rects.length; i += 8) {
+            g.drawImage(src, rects[i], rects[i + 1], rects[i + 2], rects[i + 3],
+                    rects[i + 4], rects[i + 5], rects[i + 6], rects[i + 7], null);
+        }
         g.dispose();
         return copy;
     }
@@ -592,15 +463,9 @@ final class Theme {
     private static final Map<Panel, NineSlice> PANELS = new HashMap<>();
 
     static synchronized void paintPanel(Graphics2D g2, Panel panel, int x, int y, int w, int h, int scale) {
-        NineSlice slice = PANELS.get(panel);
-        if (slice == null) {
-            slice = panel.slice();
-            PANELS.put(panel, slice);
-        }
-        slice.paint(g2, x, y, w, h, scale);
+        PANELS.computeIfAbsent(panel, Panel::slice).paint(g2, x, y, w, h, scale);
     }
 
-    /** A JPanel painted as one of the kit's panels. */
     static final class Card extends JPanel {
         private static final long serialVersionUID = 1L;
         private final Panel panel;
@@ -613,20 +478,16 @@ final class Theme {
         }
 
         @Override
-        protected void paintComponent(Graphics g) {
-            paintPanel((Graphics2D) g, panel, 0, 0, getWidth(), getHeight(), S);
-        }
+        protected void paintComponent(Graphics g) { paintPanel((Graphics2D) g, panel, 0, 0, getWidth(), getHeight(), S); }
     }
 
-    // ================================================================== slots
+    // ================================================================== inventory slots & buttons
     enum SlotKind { NORMAL, SELECTED, EMPTY, LOCKED }
 
-    /** One kit inventory slot (20 x 20) at the given scale. */
     static void drawSlot(Graphics2D g2, SlotKind kind, int x, int y, int scale) {
         g2.drawImage(kit("hud/inventory_slot_" + kind.name().toLowerCase(), scale), x, y, null);
     }
 
-    /** An inventory slot as a component: icon in the middle, count in the corner. */
     static final class Slot extends JComponent {
         private static final long serialVersionUID = 1L;
         private SlotKind kind = SlotKind.NORMAL;
@@ -641,11 +502,7 @@ final class Theme {
             setOpaque(false);
         }
 
-        /** Colour of the count in the corner (e.g. red when a recipe needs more than you have). */
-        void setCountColor(Color color) {
-            countColor = color;
-            repaint();
-        }
+        void setCountColor(Color color) { countColor = color; repaint(); }
 
         void update(SlotKind newKind, BufferedImage newIcon, String newCount, boolean fade) {
             kind = newKind;
@@ -660,51 +517,34 @@ final class Theme {
             Graphics2D g2 = (Graphics2D) g.create();
             drawSlot(g2, kind, 0, 0, S);
             if (icon != null && kind != SlotKind.LOCKED) {
-                if (faded) {
-                    g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f));
-                }
+                if (faded) g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.3f));
                 g2.drawImage(icon, (SLOT_SIZE - icon.getWidth()) / 2, (SLOT_SIZE - icon.getHeight()) / 2 - 1, null);
                 g2.setComposite(AlphaComposite.SrcOver);
             }
             if (!count.isEmpty()) {
-                int w = pixelWidth(count, 1);
-                drawPixelTextShadow(g2, count, SLOT_SIZE - w - 5, SLOT_SIZE - 10, 1, faded ? TEXT_3 : countColor);
+                drawPixelTextShadow(g2, count, SLOT_SIZE - pixelWidth(count, 1) - 5, SLOT_SIZE - 10, 1, faded ? TEXT_3 : countColor);
             }
             g2.dispose();
         }
     }
 
-    // ================================================================== buttons
     enum ButtonStyle { RED, GREY }
 
-    // the kit has these words baked into red buttons (buttons/labeled)
-    private static final Set<String> LABELED = new HashSet<>(Arrays.asList("START", "QUIT", "OPTIONS", "CONTINUE", "BACK"));
+    private static final Set<String> LABELED = Set.of("START", "QUIT", "OPTIONS", "CONTINUE", "BACK");
     private static final Map<String, NineSlice> BUTTON_SLICES = new HashMap<>();
 
-    /** Grey buttons: the kit's grey (disabled) art, lightened for hover and pushed down for pressed. */
     private static synchronized NineSlice buttonSlice(boolean red, String state) {
-        String key = (red ? "red_" : "grey_") + state;
-        NineSlice slice = BUTTON_SLICES.get(key);
-        if (slice == null) {
-            BufferedImage img;
-            if (red) {
-                img = kit("buttons/button_" + state + "_48", 1);
-            } else if (state.equals("hover")) {
-                img = recolor(kit("buttons/button_disabled_48", 1),
-                        new int[]{0xFF55525D, 0xFF3B3942, 0xFF2A282F}, new int[]{0xFF77737E, 0xFF4E4B56, 0xFF3B3942});
-            } else if (state.equals("pressed")) {
-                img = recolor(kit("buttons/button_pressed_48", 1),
-                        new int[]{0xFF922628, 0xFF66161F}, new int[]{0xFF55525D, 0xFF2A282F});
-            } else {
-                img = kit("buttons/button_disabled_48", 1);
-            }
-            slice = new NineSlice(img, 3, 3, 3, 3, false, null);
-            BUTTON_SLICES.put(key, slice);
-        }
-        return slice;
+        return BUTTON_SLICES.computeIfAbsent((red ? "red_" : "grey_") + state, key -> {
+            BufferedImage img = red ? kit("buttons/button_" + state + "_48", 1)
+                    : state.equals("hover") ? recolor(kit("buttons/button_disabled_48", 1),
+                            new int[]{0xFF55525D, 0xFF3B3942, 0xFF2A282F}, new int[]{0xFF77737E, 0xFF4E4B56, 0xFF3B3942})
+                    : state.equals("pressed") ? recolor(kit("buttons/button_pressed_48", 1),
+                            new int[]{0xFF922628, 0xFF66161F}, new int[]{0xFF55525D, 0xFF2A282F})
+                    : kit("buttons/button_disabled_48", 1);
+            return new NineSlice(img, 3, 3, 3, 3, false, null);
+        });
     }
 
-    /** A copy of an image with some exact colours swapped (used to make grey hover/pressed buttons). */
     static BufferedImage recolor(BufferedImage src, int[] from, int[] to) {
         BufferedImage out = new BufferedImage(src.getWidth(), src.getHeight(), BufferedImage.TYPE_INT_ARGB);
         for (int y = 0; y < src.getHeight(); y++) {
@@ -738,10 +578,7 @@ final class Theme {
         button.setCursor(handCursor());
     }
 
-    /** Tabs and the class picker: grey kit buttons that turn red while selected. */
-    static void styleToggle(AbstractButton button) {
-        styleButton(button, ButtonStyle.GREY);
-    }
+    static void styleToggle(AbstractButton button) { styleButton(button, ButtonStyle.GREY); }
 
     static void setKeyHint(AbstractButton button, String key) {
         button.putClientProperty(KEY_HINT, key);
@@ -753,64 +590,41 @@ final class Theme {
         button.revalidate();
     }
 
-    /** Paints kit buttons: 9-slice background for the state, pixel-font text, optional key cap. */
     static final class KitButtonUI extends BasicButtonUI {
         private final ButtonStyle style;
-
-        KitButtonUI(ButtonStyle style) {
-            this.style = style;
-        }
+        KitButtonUI(ButtonStyle style) { this.style = style; }
 
         private static int scaleOf(AbstractButton b) {
-            Object s = b.getClientProperty(BUTTON_SCALE);
-            return s instanceof Integer ? (Integer) s : S;
-        }
-
-        private boolean isRed(AbstractButton b) {
-            boolean toggle = b instanceof JToggleButton || b instanceof JRadioButton;
-            return style == ButtonStyle.RED || (toggle && b.isSelected());
+            return b.getClientProperty(BUTTON_SCALE) instanceof Integer s ? s : S;
         }
 
         private static String state(AbstractButton b) {
             ButtonModel m = b.getModel();
-            if (!m.isEnabled()) {
-                return "disabled";
-            }
-            if (m.isArmed() && m.isPressed()) {
-                return "pressed";
-            }
+            if (!m.isEnabled()) return "disabled";
+            if (m.isArmed() && m.isPressed()) return "pressed";
             return m.isRollover() ? "hover" : "normal";
         }
 
-        /** The kit's ready-made word button (START, QUIT ...) when this is a plain red button with that word. */
         private BufferedImage labeled(AbstractButton b) {
             String word = b.getText().trim().toUpperCase();
-            if (style == ButtonStyle.RED && LABELED.contains(word) && b.getClientProperty(KEY_HINT) == null) {
-                return kit("buttons/labeled/" + word.toLowerCase() + "_" + state(b), scaleOf(b));
-            }
-            return null;
+            return style == ButtonStyle.RED && LABELED.contains(word) && b.getClientProperty(KEY_HINT) == null
+                    ? kit("buttons/labeled/" + word.toLowerCase() + "_" + state(b), scaleOf(b)) : null;
+        }
+
+        private static BufferedImage hintSprite(AbstractButton b) {
+            Object hint = b.getClientProperty(KEY_HINT);
+            return hint == null ? null : keySprite(hint.toString(), 1);
         }
 
         @Override
         public Dimension getPreferredSize(JComponent c) {
             AbstractButton b = (AbstractButton) c;
             BufferedImage word = labeled(b);
-            if (word != null) {
-                return new Dimension(word.getWidth(), word.getHeight());
-            }
+            if (word != null) return new Dimension(word.getWidth(), word.getHeight());
             int s = scaleOf(b);
             int pad = (b instanceof JToggleButton || b instanceof JRadioButton) ? 8 * s : 14 * s;
-            int w = pixelWidth(b.getText(), s) + pad;
             BufferedImage hint = hintSprite(b);
-            if (hint != null) {
-                w += hint.getWidth() + 3 * s;
-            }
-            return new Dimension(w, 16 * s);
-        }
-
-        private static BufferedImage hintSprite(AbstractButton b) {
-            Object hint = b.getClientProperty(KEY_HINT);
-            return hint == null ? null : keySprite(hint.toString(), 1);
+            return new Dimension(pixelWidth(b.getText(), s) + pad + (hint == null ? 0 : hint.getWidth() + 3 * s), 16 * s);
         }
 
         @Override
@@ -826,17 +640,14 @@ final class Theme {
             }
             int s = scaleOf(b);
             String state = state(b);
-            buttonSlice(isRed(b), state).paint(g2, 0, 0, w, h, s);
+            boolean red = style == ButtonStyle.RED || ((b instanceof JToggleButton || b instanceof JRadioButton) && b.isSelected());
+            buttonSlice(red, state).paint(g2, 0, 0, w, h, s);
             BufferedImage hint = hintSprite(b);
             int textW = pixelWidth(b.getText(), s);
             int groupW = textW + (hint == null ? 0 : hint.getWidth() + 3 * s);
-            int x = (w - groupW) / 2;
-            int push = state.equals("pressed") ? s : 0;
-            int y = (h - 5 * s) / 2 - s / 2 + push;
+            int x = (w - groupW) / 2, push = state.equals("pressed") ? s : 0, y = (h - 5 * s) / 2 - s / 2 + push;
             drawPixelText(g2, b.getText(), x, y, s, b.isEnabled() ? TEXT : TEXT_3);
-            if (hint != null) {
-                g2.drawImage(hint, x + textW + 3 * s, (h - hint.getHeight()) / 2 + push, null);
-            }
+            if (hint != null) g2.drawImage(hint, x + textW + 3 * s, (h - hint.getHeight()) / 2 + push, null);
             g2.dispose();
         }
     }
@@ -853,23 +664,14 @@ final class Theme {
         box.setCursor(handCursor());
     }
 
-    /** The kit's check box (on / off) at 2x; it reads the check box's state when painting. */
     static final class CheckIcon implements Icon {
         @Override
         public void paintIcon(Component c, Graphics g, int x, int y) {
-            boolean on = c instanceof AbstractButton && ((AbstractButton) c).isSelected();
+            boolean on = c instanceof AbstractButton b && b.isSelected();
             g.drawImage(kit(on ? "buttons/checkbox_on" : "buttons/checkbox_off", S), x, y, null);
         }
-
-        @Override
-        public int getIconWidth() {
-            return 16 * S;
-        }
-
-        @Override
-        public int getIconHeight() {
-            return 16 * S;
-        }
+        @Override public int getIconWidth() { return 16 * S; }
+        @Override public int getIconHeight() { return 16 * S; }
     }
 
     static void styleSlider(JSlider slider) {
@@ -883,22 +685,14 @@ final class Theme {
         slider.setCursor(handCursor());
     }
 
-    /** The kit slider: thin track, red up to the knob, cream knob with a dark outline. */
     static final class KitSliderUI extends BasicSliderUI {
-        KitSliderUI(JSlider slider) {
-            super(slider);
-        }
-
-        @Override
-        protected Dimension getThumbSize() {
-            return new Dimension(5 * S, 8 * S);
-        }
+        KitSliderUI(JSlider slider) { super(slider); }
+        @Override protected Dimension getThumbSize() { return new Dimension(5 * S, 8 * S); }
 
         @Override
         public void paintTrack(Graphics g) {
             Rectangle t = trackRect;
-            int y = t.y + t.height / 2 - S;
-            int knob = thumbRect.x + thumbRect.width / 2;
+            int y = t.y + t.height / 2 - S, knob = thumbRect.x + thumbRect.width / 2;
             g.setColor(INK);
             g.fillRect(t.x, y, t.width, 2 * S);
             g.setColor(slider.isEnabled() ? DARK_RED : GREY_2);
@@ -915,26 +709,16 @@ final class Theme {
             g.fillRect(x + S, y + S, 3 * S, 6 * S);
         }
 
-        @Override
-        public void paintFocus(Graphics g) {
-            // no focus rectangle
-        }
+        @Override public void paintFocus(Graphics g) {}
     }
 
-    /** Bar fills from the kit (bars/fill_*_60x6). */
     enum Fill { HEALTH, STAMINA, AMMO, INFECTION, WATER }
-
     private static NineSlice barFrame;
 
-    /** Paints the kit bar: dark frame and a coloured fill for the given fraction (0..1). */
     static synchronized void drawBar(Graphics2D g2, Fill fill, int x, int y, int w, double fraction, int scale) {
-        if (barFrame == null) {
-            barFrame = new NineSlice(kit("bars/bar_frame_64", 1), 2, 2, 2, 2, false, SLOT);
-        }
-        int h = 10 * scale;
-        barFrame.paint(g2, x, y, w, h, scale);
-        int innerW = w - 4 * scale;
-        int fillW = (int) Math.round(innerW * Math.max(0, Math.min(1, fraction)));
+        if (barFrame == null) barFrame = new NineSlice(kit("bars/bar_frame_64", 1), 2, 2, 2, 2, false, SLOT);
+        barFrame.paint(g2, x, y, w, 10 * scale, scale);
+        int fillW = (int) Math.round((w - 4 * scale) * Math.max(0, Math.min(1, fraction)));
         if (fillW > 0) {
             Graphics2D g = (Graphics2D) g2.create();
             g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
@@ -943,7 +727,6 @@ final class Theme {
         }
     }
 
-    /** A JProgressBar painted as a kit bar. */
     static JProgressBar bar(Fill fill, int width, int scale) {
         JProgressBar bar = new JProgressBar(0, 100);
         bar.setUI(new KitBarUI(fill, scale));
@@ -957,11 +740,7 @@ final class Theme {
     static final class KitBarUI extends BasicProgressBarUI {
         private final Fill fill;
         private final int scale;
-
-        KitBarUI(Fill fill, int scale) {
-            this.fill = fill;
-            this.scale = scale;
-        }
+        KitBarUI(Fill fill, int scale) { this.fill = fill; this.scale = scale; }
 
         @Override
         public void paint(Graphics g, JComponent c) {
@@ -972,8 +751,7 @@ final class Theme {
         }
     }
 
-    // ================================================================== text field and combo box
-    /** A text field drawn inside a kit slot frame: gold frame while typing, red frame on an error. */
+    // ================================================================== text field, combo, scroll, table
     static final class KitField extends JTextField {
         private static final long serialVersionUID = 1L;
         private boolean error;
@@ -989,45 +767,14 @@ final class Theme {
             setBorder(new EmptyBorder(0, 14, 0, 14));
             setPreferredSize(new Dimension(10, 18 * S));
             setMinimumSize(new Dimension(40, 18 * S));
-            getDocument().addDocumentListener(new DocumentListener() {
-                @Override
-                public void insertUpdate(DocumentEvent e) {
-                    clearOnEdit();
-                }
-
-                @Override
-                public void removeUpdate(DocumentEvent e) {
-                    clearOnEdit();
-                }
-
-                @Override
-                public void changedUpdate(DocumentEvent e) {
-                    clearOnEdit();
-                }
-
-                private void clearOnEdit() {
-                    if (error) {
-                        setError(false);
-                    }
-                }
-            });
+            onEdit(this, () -> { if (error) setError(false); });
             addFocusListener(new FocusAdapter() {
-                @Override
-                public void focusGained(FocusEvent e) {
-                    repaint();
-                }
-
-                @Override
-                public void focusLost(FocusEvent e) {
-                    repaint();
-                }
+                @Override public void focusGained(FocusEvent e) { repaint(); }
+                @Override public void focusLost(FocusEvent e) { repaint(); }
             });
         }
 
-        void setError(boolean on) {
-            error = on;
-            repaint();
-        }
+        void setError(boolean on) { error = on; repaint(); }
 
         @Override
         protected void paintComponent(Graphics g) {
@@ -1039,14 +786,8 @@ final class Theme {
 
     private static final Map<SlotKind, NineSlice> SLOT_FRAMES = new HashMap<>();
 
-    /** The frame of a kit slot stretched to any size (the centre is filled plainly). */
     static synchronized NineSlice slotFrame(SlotKind kind) {
-        NineSlice slice = SLOT_FRAMES.get(kind);
-        if (slice == null) {
-            slice = new NineSlice(kit("hud/inventory_slot_" + kind.name().toLowerCase(), 1), 3, 3, 3, 3, false, SLOT);
-            SLOT_FRAMES.put(kind, slice);
-        }
-        return slice;
+        return SLOT_FRAMES.computeIfAbsent(kind, k -> new NineSlice(kit("hud/inventory_slot_" + k.name().toLowerCase(), 1), 3, 3, 3, 3, false, SLOT));
     }
 
     static <T> void styleCombo(JComboBox<T> combo, ListCellRenderer<? super T> renderer) {
@@ -1079,15 +820,11 @@ final class Theme {
 
         @Override
         public void paint(Graphics g, JComponent c) {
-            slotFrame(isPopupVisible(comboBox) ? SlotKind.SELECTED : SlotKind.NORMAL)
-                    .paint((Graphics2D) g, 0, 0, c.getWidth(), c.getHeight(), S);
+            slotFrame(isPopupVisible(comboBox) ? SlotKind.SELECTED : SlotKind.NORMAL).paint((Graphics2D) g, 0, 0, c.getWidth(), c.getHeight(), S);
             super.paint(g, c);
         }
 
-        @Override
-        public void paintCurrentValueBackground(Graphics g, Rectangle bounds, boolean hasFocus) {
-            // the slot frame already filled the background
-        }
+        @Override public void paintCurrentValueBackground(Graphics g, Rectangle bounds, boolean hasFocus) {}
 
         @Override
         protected ComboPopup createPopup() {
@@ -1098,42 +835,23 @@ final class Theme {
         }
     }
 
-    /** A pixel "v" arrow for the combo box. */
     private static final class ArrowIcon implements Icon {
         @Override
         public void paintIcon(Component c, Graphics g, int x, int y) {
             g.setColor(TEXT);
-            for (int i = 0; i < 3; i++) {
-                g.fillRect(x + i * S, y + i * S, (5 - 2 * i) * S, S);
-            }
+            for (int i = 0; i < 3; i++) g.fillRect(x + i * S, y + i * S, (5 - 2 * i) * S, S);
         }
-
-        @Override
-        public int getIconWidth() {
-            return 5 * S;
-        }
-
-        @Override
-        public int getIconHeight() {
-            return 3 * S;
-        }
+        @Override public int getIconWidth() { return 5 * S; }
+        @Override public int getIconHeight() { return 3 * S; }
     }
 
-    /** Combo box rows: cream text on the slot colour; the closed combo shows only the value. */
     static class ListRenderer<T> extends JLabel implements ListCellRenderer<T> {
         private static final long serialVersionUID = 1L;
-
-        ListRenderer() {
-            setFont(font(Font.PLAIN, 13));
-        }
-
-        String textFor(T value) {
-            return String.valueOf(value);
-        }
+        ListRenderer() { setFont(font(Font.PLAIN, 13)); }
+        String textFor(T value) { return String.valueOf(value); }
 
         @Override
-        public Component getListCellRendererComponent(JList<? extends T> list, T value, int index,
-                                                      boolean selected, boolean focused) {
+        public Component getListCellRendererComponent(JList<? extends T> list, T value, int index, boolean selected, boolean focused) {
             setText(value == null ? "" : textFor(value));
             boolean inPopup = index >= 0;
             setOpaque(inPopup);
@@ -1144,7 +862,6 @@ final class Theme {
         }
     }
 
-    // ================================================================== scrolling and tables
     static JScrollPane scroll(JComponent view, Color background) {
         JScrollPane pane = new JScrollPane(view);
         pane.setBorder(BorderFactory.createEmptyBorder());
@@ -1159,47 +876,25 @@ final class Theme {
         return pane;
     }
 
-    /** Square grey thumb with a dark outline, no arrow buttons. */
     static final class KitScrollBarUI extends BasicScrollBarUI {
-        @Override
-        protected void configureScrollBarColors() {
-            thumbColor = GREY_2;
-            trackColor = new Color(0, 0, 0, 0);
-        }
-
-        @Override
-        protected JButton createDecreaseButton(int orientation) {
-            return zeroButton();
-        }
-
-        @Override
-        protected JButton createIncreaseButton(int orientation) {
-            return zeroButton();
-        }
+        @Override protected void configureScrollBarColors() { thumbColor = GREY_2; trackColor = new Color(0, 0, 0, 0); }
+        @Override protected JButton createDecreaseButton(int orientation) { return zeroButton(); }
+        @Override protected JButton createIncreaseButton(int orientation) { return zeroButton(); }
+        @Override public Dimension getPreferredSize(JComponent c) { return new Dimension(6 * S, 6 * S); }
+        @Override protected void paintTrack(Graphics g, JComponent c, Rectangle bounds) {}
 
         private static JButton zeroButton() {
             JButton b = new JButton();
-            b.setPreferredSize(new Dimension(0, 0));
-            b.setMinimumSize(new Dimension(0, 0));
-            b.setMaximumSize(new Dimension(0, 0));
+            Dimension zero = new Dimension(0, 0);
+            b.setPreferredSize(zero);
+            b.setMinimumSize(zero);
+            b.setMaximumSize(zero);
             return b;
         }
 
         @Override
-        public Dimension getPreferredSize(JComponent c) {
-            return new Dimension(6 * S, 6 * S);
-        }
-
-        @Override
-        protected void paintTrack(Graphics g, JComponent c, Rectangle bounds) {
-            // invisible track
-        }
-
-        @Override
         protected void paintThumb(Graphics g, JComponent c, Rectangle r) {
-            if (r.isEmpty() || !scrollbar.isEnabled()) {
-                return;
-            }
+            if (r.isEmpty() || !scrollbar.isEnabled()) return;
             g.setColor(INK);
             g.fillRect(r.x + S, r.y, r.width - 2 * S, r.height);
             g.setColor(isThumbRollover() ? GREY_3 : GREY_2);
@@ -1226,20 +921,16 @@ final class Theme {
         header.setPreferredSize(new Dimension(10, 28));
     }
 
-    /** Table headers in the pixel font with a dark line underneath. Columns named "#..." are right-aligned. */
     static final class HeaderRenderer extends JComponent implements TableCellRenderer {
         private static final long serialVersionUID = 1L;
         private String text = "";
         private boolean right;
 
         @Override
-        public Component getTableCellRendererComponent(JTable table, Object value, boolean selected,
-                                                       boolean focused, int row, int column) {
+        public Component getTableCellRendererComponent(JTable table, Object value, boolean selected, boolean focused, int row, int column) {
             text = String.valueOf(value);
             right = column > 0 && text.startsWith("#");
-            if (right) {
-                text = text.substring(1);
-            }
+            if (right) text = text.substring(1);
             return this;
         }
 
@@ -1256,25 +947,15 @@ final class Theme {
         }
     }
 
-    // ================================================================== dialog box with a portrait
-    /**
-     * The kit's dialog box (176 x 48 at 2x): a portrait on the left and up to three lines of text
-     * written on its ruled lines, like a character speaking.
-     */
+    // ================================================================== SpeechBox & HUD drawing strips
     static final class SpeechBox extends JComponent {
         private static final long serialVersionUID = 1L;
-        private final transient BufferedImage boxImage;
-        private final transient BufferedImage portrait;
+        private final transient BufferedImage boxImage, portrait;
         private String message;
 
         SpeechBox(String portraitName, String message) {
             BufferedImage raw = kit("panels/dialog_box_176x48", 1);
-            BufferedImage clean = copyImage(raw);
-            Graphics2D g = clean.createGraphics();
-            // remove the stray rust speck on the right border
-            g.drawImage(raw, 173, 24, 176, 25, 173, 20, 176, 21, null);
-            g.dispose();
-            this.boxImage = scale(clean, S);
+            this.boxImage = scale(copyWithPatches(raw, false, 173, 24, 176, 25, 173, 20, 176, 21), S);
             this.portrait = kit("hud/" + portraitName, S);
             this.message = message;
             setPreferredSize(new Dimension(176 * S, 48 * S));
@@ -1282,10 +963,7 @@ final class Theme {
             setOpaque(false);
         }
 
-        void setMessage(String text) {
-            message = text;
-            repaint();
-        }
+        void setMessage(String text) { message = text; repaint(); }
 
         @Override
         protected void paintComponent(Graphics g) {
@@ -1295,7 +973,7 @@ final class Theme {
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             g2.setFont(font(Font.PLAIN, 12));
             g2.setColor(TEXT);
-            int[] lines = {12, 20, 28};   // the ruled lines of the box (image pixels)
+            int[] lines = {12, 20, 28};
             List<String> wrapped = wrap(message, g2.getFontMetrics(), (166 - 48) * S);
             for (int i = 0; i < Math.min(lines.length, wrapped.size()); i++) {
                 g2.drawString(wrapped.get(i), 48 * S, lines[i] * S - 3);
@@ -1304,105 +982,69 @@ final class Theme {
         }
     }
 
-    /** Splits text into lines that fit a width. */
     static List<String> wrap(String text, FontMetrics fm, int width) {
         List<String> lines = new ArrayList<>();
         StringBuilder line = new StringBuilder();
         for (String word : text.split(" ")) {
-            String test = line.length() == 0 ? word : line + " " + word;
-            if (fm.stringWidth(test) > width && line.length() > 0) {
+            String test = line.isEmpty() ? word : line + " " + word;
+            if (fm.stringWidth(test) > width && !line.isEmpty()) {
                 lines.add(line.toString());
                 line = new StringBuilder(word);
             } else {
                 line = new StringBuilder(test);
             }
         }
-        if (line.length() > 0) {
-            lines.add(line.toString());
-        }
+        if (!line.isEmpty()) lines.add(line.toString());
         return lines;
     }
 
-    // ================================================================== HUD pieces drawn with Graphics2D
-    /**
-     * The kit's red banner (from hud/day_banner_example) with any text: its ends are kept,
-     * the middle is stretched, and the text is written in the pixel font. Centred on cx.
-     */
     static void drawBanner(Graphics2D g2, String text, int cx, int y, int scale) {
-        BufferedImage src = kit("hud/day_banner_example", 1);
-        int textW = pixelWidth(text, 2);
-        int w = 12 + textW + 14;
-        BufferedImage banner = new BufferedImage(w, src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D b = banner.createGraphics();
-        drawHudStrip(b, src, 0, 0, w, 1, 11, 14);
-        drawPixelText(b, text, 12, 5, 2, TEXT);
-        b.dispose();
-        Graphics2D g = (Graphics2D) g2.create();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.drawImage(banner, cx - w * scale / 2, y, w * scale, banner.getHeight() * scale, null);
-        g.dispose();
+        drawLabeledStrip(g2, "hud/day_banner_example", text, cx, y, scale, 2, 11, 14, 12, 5, 12 + pixelWidth(text, 2) + 14, true);
     }
 
-    /** The kit's ammo counter (three bullets on a dark plate) with the real number. Returns its width. */
     static int drawAmmoCounter(Graphics2D g2, String count, int x, int y, int scale) {
-        BufferedImage src = kit("hud/ammo_counter_example", 1);
-        int textW = pixelWidth(count, 1);
-        int w = 17 + textW + 5;
-        BufferedImage plate = new BufferedImage(w, src.getHeight(), BufferedImage.TYPE_INT_ARGB);
-        Graphics2D p = plate.createGraphics();
-        drawHudStrip(p, src, 0, 0, w, 1, 16, 2);
-        drawPixelText(p, count, 18, 5, 1, TEXT);
-        p.dispose();
+        return drawLabeledStrip(g2, "hud/ammo_counter_example", count, x, y, scale, 1, 16, 2, 18, 5, 17 + pixelWidth(count, 1) + 5, false);
+    }
+
+    private static int drawLabeledStrip(Graphics2D g2, String spritePath, String text, int x, int y,
+            int scale, int fontScale, int leftCap, int rightCap, int textX, int textY, int width, boolean centerX) {
+        BufferedImage src = kit(spritePath, 1);
+        BufferedImage strip = new BufferedImage(width, src.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        Graphics2D sg = strip.createGraphics();
+        drawHudStrip(sg, src, 0, 0, width, 1, leftCap, rightCap);
+        drawPixelText(sg, text, textX, textY, fontScale, TEXT);
+        sg.dispose();
         Graphics2D g = (Graphics2D) g2.create();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.drawImage(plate, x, y, w * scale, plate.getHeight() * scale, null);
+        g.drawImage(strip, centerX ? x - width * scale / 2 : x, y, width * scale, strip.getHeight() * scale, null);
         g.dispose();
-        return w * scale;
+        return width * scale;
     }
 
-    static int ammoCounterWidth(String count, int scale) {
-        return (17 + pixelWidth(count, 1) + 5) * scale;
-    }
+    static int ammoCounterWidth(String count, int scale) { return (17 + pixelWidth(count, 1) + 5) * scale; }
+    static int hotbarWidth(int slots, int scale) { return (3 + slots * 20 + Math.max(0, slots - 1) * 2 + 3) * scale; }
 
-    /** The kit's hotbar frame (left end, stretched middle, right end) behind a row of slots. */
     static void drawHotbarFrame(Graphics2D g2, int x, int y, int slots, int scale) {
-        BufferedImage src = kit("hud/hotbar_6", 1);
-        int w = hotbarWidth(slots, 1);
         Graphics2D g = (Graphics2D) g2.create();
         g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        drawHudStrip(g, src, x, y, w, scale, 2, 2);
+        drawHudStrip(g, kit("hud/hotbar_6", 1), x, y, hotbarWidth(slots, 1), scale, 2, 2);
         g.dispose();
     }
 
-    /** Draws the two end caps and stretches the source column beside the left cap. */
-    private static void drawHudStrip(Graphics2D g, BufferedImage src, int x, int y, int width, int scale,
-            int leftCap, int rightCap) {
-        int height = src.getHeight();
-        int bottom = y + height * scale;
-        int leftEnd = x + leftCap * scale;
-        int rightStart = x + (width - rightCap) * scale;
-        int right = x + width * scale;
-        g.drawImage(src, x, y, leftEnd, bottom, 0, 0, leftCap, height, null);
-        g.drawImage(src, leftEnd, y, rightStart, bottom, leftCap, 0, leftCap + 1, height, null);
-        g.drawImage(src, rightStart, y, right, bottom, src.getWidth() - rightCap, 0, src.getWidth(), height, null);
+    private static void drawHudStrip(Graphics2D g, BufferedImage src, int x, int y, int width, int scale, int leftCap, int rightCap) {
+        int h = src.getHeight(), bot = y + h * scale, leftEnd = x + leftCap * scale;
+        int rightStart = x + (width - rightCap) * scale, right = x + width * scale;
+        g.drawImage(src, x, y, leftEnd, bot, 0, 0, leftCap, h, null);
+        g.drawImage(src, leftEnd, y, rightStart, bot, leftCap, 0, leftCap + 1, h, null);
+        g.drawImage(src, rightStart, y, right, bot, src.getWidth() - rightCap, 0, src.getWidth(), h, null);
     }
 
-    static int hotbarWidth(int slots, int scale) {
-        return (3 + slots * 20 + Math.max(0, slots - 1) * 2 + 3) * scale;
-    }
-
-    // minimap frame without its north notch, so the notch is not stretched
     private static NineSlice minimapFrame;
 
-    /** The kit's square minimap frame stretched around a w x h area, with its notch centred on top. */
     static synchronized void drawMinimapFrame(Graphics2D g2, int x, int y, int w, int h, int scale) {
         BufferedImage src = kit("hud/minimap_frame_square", 1);
         if (minimapFrame == null) {
-            BufferedImage plain = copyImage(src);
-            Graphics2D p = plain.createGraphics();
-            p.setComposite(AlphaComposite.Src);
-            p.drawImage(src, 28, 0, 36, 5, 20, 0, 28, 5, null);   // copy a plain piece of edge over the notch
-            p.dispose();
+            BufferedImage plain = copyWithPatches(src, true, 28, 0, 36, 5, 20, 0, 28, 5);
             minimapFrame = new NineSlice(plain, 3, 3, 3, 3, false, null);
         }
         minimapFrame.paint(g2, x, y, w, h, scale);
@@ -1413,12 +1055,7 @@ final class Theme {
         g.dispose();
     }
 
-    // ================================================================== dialogs
-    /**
-     * A small modal message drawn on a kit panel (replaces JOptionPane).
-     * titleSprite: a kit title such as "titles/survived", or null to write the title in the pixel font.
-     * rows: optional label / value pairs. Returns true for the primary button (or Enter).
-     */
+    // ================================================================== modal dialogs & image utilities
     static boolean ask(Window owner, Panel panel, String titleSprite, String title, String message,
                        String[][] rows, String primaryText, String secondaryText) {
         JDialog dialog = new JDialog(owner, title, Dialog.ModalityType.APPLICATION_MODAL);
@@ -1440,7 +1077,7 @@ final class Theme {
             text.add(titleLabel, BorderLayout.NORTH);
         }
         JTextArea body = textBlock(message, 13, mutedColor);
-        body.setSize(new Dimension(320, 1));   // a fixed width lets the text area work out its wrapped height
+        body.setSize(new Dimension(320, 1));
         body.setPreferredSize(new Dimension(320, body.getPreferredSize().height));
         text.add(body, BorderLayout.CENTER);
         if (rows != null) {
@@ -1458,25 +1095,17 @@ final class Theme {
 
         JButton primary = button(primaryText, ButtonStyle.RED);
         JPanel buttons = transparentPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
-        JButton secondary = null;
-        if (secondaryText != null) {
-            secondary = button(secondaryText, ButtonStyle.GREY);
-            buttons.add(secondary);
-        }
+        JButton secondary = secondaryText != null ? button(secondaryText, ButtonStyle.GREY) : null;
+        if (secondary != null) buttons.add(secondary);
         buttons.add(primary);
         content.add(buttons, BorderLayout.SOUTH);
 
-        ActionListener close = new ActionListener() {
-            @Override
-            public void actionPerformed(ActionEvent e) {
-                answer[0] = e.getSource() == primary || "enter".equals(e.getActionCommand());
-                dialog.dispose();
-            }
+        ActionListener close = e -> {
+            answer[0] = e.getSource() == primary || "enter".equals(e.getActionCommand());
+            dialog.dispose();
         };
         primary.addActionListener(close);
-        if (secondary != null) {
-            secondary.addActionListener(close);
-        }
+        if (secondary != null) secondary.addActionListener(close);
         bindKey(dialog, KeyEvent.VK_ENTER, "enter", close);
         bindKey(dialog, KeyEvent.VK_ESCAPE, "escape", close);
 
@@ -1484,7 +1113,7 @@ final class Theme {
         dialog.getRootPane().setCursor(arrowCursor());
         dialog.pack();
         dialog.setLocationRelativeTo(owner);
-        dialog.setVisible(true);   // modal: waits here until a button closes it
+        dialog.setVisible(true);
         return answer[0];
     }
 
@@ -1492,21 +1121,22 @@ final class Theme {
         dialog.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(KeyStroke.getKeyStroke(key, 0), command);
         dialog.getRootPane().getActionMap().put(command, new AbstractAction(command) {
             private static final long serialVersionUID = 1L;
-
-            @Override
-            public void actionPerformed(ActionEvent e) {
+            @Override public void actionPerformed(ActionEvent e) {
                 listener.actionPerformed(new ActionEvent(dialog, ActionEvent.ACTION_PERFORMED, command));
             }
         });
     }
 
-    // ================================================================== image helpers
-    /** Nearest-neighbour upscale: keeps pixel art sharp. */
     static BufferedImage scale(BufferedImage src, int factor) {
-        return resize(src, src.getWidth() * factor, src.getHeight() * factor, false);
+        int w = src.getWidth() * factor, h = src.getHeight() * factor;
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = out.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
+        g.drawImage(src, 0, 0, w, h, null);
+        g.dispose();
+        return out;
     }
 
-    /** Cuts away the transparent margin of a sprite, then scales it by the largest whole factor that fits w x h. */
     static BufferedImage fit(BufferedImage src, int w, int h) {
         int minX = src.getWidth(), minY = src.getHeight(), maxX = -1, maxY = -1;
         for (int y = 0; y < src.getHeight(); y++) {
@@ -1519,25 +1149,11 @@ final class Theme {
                 }
             }
         }
-        if (maxX < 0) {
-            return src;
-        }
+        if (maxX < 0) return src;
         BufferedImage trimmed = src.getSubimage(minX, minY, maxX - minX + 1, maxY - minY + 1);
-        int factor = Math.max(1, Math.min(w / trimmed.getWidth(), h / trimmed.getHeight()));
-        return scale(trimmed, factor);
+        return scale(trimmed, Math.max(1, Math.min(w / trimmed.getWidth(), h / trimmed.getHeight())));
     }
 
-    static BufferedImage resize(BufferedImage src, int w, int h, boolean smooth) {
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = out.createGraphics();
-        g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, smooth
-                ? RenderingHints.VALUE_INTERPOLATION_BILINEAR : RenderingHints.VALUE_INTERPOLATION_NEAREST_NEIGHBOR);
-        g.drawImage(src, 0, 0, w, h, null);
-        g.dispose();
-        return out;
-    }
-
-    /** Antialiased text and nearest-neighbour images for custom painting. */
     static Graphics2D smooth(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
         g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
@@ -1545,81 +1161,24 @@ final class Theme {
         return g2;
     }
 
-    /** Metal colours swapped for the kit palette (popups, tooltips, default panels). */
     private static final class KitMetalTheme extends DefaultMetalTheme {
-        private static final ColorUIResource PRIMARY1 = new ColorUIResource(GOLD);
-        private static final ColorUIResource PRIMARY2 = new ColorUIResource(GREY_1);
-        private static final ColorUIResource PRIMARY3 = new ColorUIResource(GREY_1);
-        private static final ColorUIResource SECONDARY1 = new ColorUIResource(GREY_3);
-        private static final ColorUIResource SECONDARY2 = new ColorUIResource(GREY_1);
-        private static final ColorUIResource SECONDARY3 = new ColorUIResource(BG);
-        private static final ColorUIResource TEXT_COLOR = new ColorUIResource(TEXT);
-        private static final ColorUIResource DARK = new ColorUIResource(SLOT);
-        private static final FontUIResource CONTROL_FONT = new FontUIResource(font(Font.PLAIN, 13));
+        private static final ColorUIResource P1 = new ColorUIResource(GOLD), P2 = new ColorUIResource(GREY_1);
+        private static final ColorUIResource S1 = new ColorUIResource(GREY_3), S2 = new ColorUIResource(GREY_1), S3 = new ColorUIResource(BG);
+        private static final ColorUIResource TX = new ColorUIResource(TEXT), DK = new ColorUIResource(SLOT);
+        private static final FontUIResource FONT = new FontUIResource(font(Font.PLAIN, 13));
 
-        @Override
-        public String getName() {
-            return "Hollow Creek";
-        }
-
-        @Override
-        protected ColorUIResource getPrimary1() {
-            return PRIMARY1;
-        }
-
-        @Override
-        protected ColorUIResource getPrimary2() {
-            return PRIMARY2;
-        }
-
-        @Override
-        protected ColorUIResource getPrimary3() {
-            return PRIMARY3;
-        }
-
-        @Override
-        protected ColorUIResource getSecondary1() {
-            return SECONDARY1;
-        }
-
-        @Override
-        protected ColorUIResource getSecondary2() {
-            return SECONDARY2;
-        }
-
-        @Override
-        protected ColorUIResource getSecondary3() {
-            return SECONDARY3;
-        }
-
-        @Override
-        protected ColorUIResource getBlack() {
-            return TEXT_COLOR;
-        }
-
-        @Override
-        protected ColorUIResource getWhite() {
-            return DARK;
-        }
-
-        @Override
-        public FontUIResource getControlTextFont() {
-            return CONTROL_FONT;
-        }
-
-        @Override
-        public FontUIResource getSystemTextFont() {
-            return CONTROL_FONT;
-        }
-
-        @Override
-        public FontUIResource getUserTextFont() {
-            return CONTROL_FONT;
-        }
-
-        @Override
-        public FontUIResource getMenuTextFont() {
-            return CONTROL_FONT;
-        }
+        @Override public String getName() { return "Hollow Creek"; }
+        @Override protected ColorUIResource getPrimary1() { return P1; }
+        @Override protected ColorUIResource getPrimary2() { return P2; }
+        @Override protected ColorUIResource getPrimary3() { return P2; }
+        @Override protected ColorUIResource getSecondary1() { return S1; }
+        @Override protected ColorUIResource getSecondary2() { return S2; }
+        @Override protected ColorUIResource getSecondary3() { return S3; }
+        @Override protected ColorUIResource getBlack() { return TX; }
+        @Override protected ColorUIResource getWhite() { return DK; }
+        @Override public FontUIResource getControlTextFont() { return FONT; }
+        @Override public FontUIResource getSystemTextFont() { return FONT; }
+        @Override public FontUIResource getUserTextFont() { return FONT; }
+        @Override public FontUIResource getMenuTextFont() { return FONT; }
     }
 }

@@ -15,52 +15,23 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * One enemy. The same class is used for all 5 monster types: the numbers and sprites come
- * from GameData.MonsterType.
- *
- * Each tick GamePanel calls update(), then asks:
- *   tryContactAttack()  -> damage to apply to the player this tick (0 = no bite)
- *   takeProjectile()    -> a Bullet the monster just fired (bandit / toxic), or null
- * When a bullet hits: takeHit(damage, angle, knockback) returns true if that hit killed it;
- * then rollDrops(...) gives the loot. After the death animation and a short fade the monster
- * reports isRemovable() and can be taken out of the list.
+ * Enemy entity driven by GameData.MonsterType stats and animations (Zombie, Runner, Toxic, Bandit, Boss).
  */
 public final class Monster extends Entity {
 
-    private static final int CORPSE_TICKS = 150;     // how long the body stays after the death animation
-    private static final int FADE_TICKS = 40;        // last part of that time is a fade-out
-    private static final int HIT_FLASH_TICKS = 6;
+    private static final int CORPSE_TICKS = 150, FADE_TICKS = 40, HIT_FLASH_TICKS = 6;
 
     private final GameData.MonsterType type;
     private final Player target;
-    private final BufferedImage[] runFrames, hitFrames, deathFrames;
-    private final BufferedImage[] aimFrames;   // bandit only: stands still (idle strip) while aiming
+    private final BufferedImage[] runFrames, hitFrames, deathFrames, aimFrames;
 
-    private int attackCooldown;      // ticks until the next bite is allowed
-    private int rangedCooldown;      // ticks until the next shot
-    private int hitFlash;            // white flash after being hit
-    private int hitAnim;             // ticks left showing the "hit" strip
-    private double pushX, pushY;     // knockback velocity, decays every tick
-    private int deathTick;           // ticks since death
-    private double chaseAngle;       // cached path direction
-    private int repathTimer;
-    private int stuckTicks;
-    private double nudgeAngle;
-    private int nudgeTicks;
-    private int strafeSign;
-    private final List<Bullet> pendingShots = new ArrayList<>();
-    private int aimWarning;          // ticks of the "!" warning before a bandit fires
-    private boolean raiding;         // true = marching on base during Raid; false = outer-zone scavenger
-    private boolean provoked;        // true once hit by player or guard
-    private int slowTicks;
-    private int lungeTicks;
+    private int attackCooldown, rangedCooldown, hitFlash, hitAnim, deathTick;
+    private int repathTimer, stuckTicks, nudgeTicks, strafeSign, aimWarning, slowTicks, lungeTicks, wanderTimer;
+    private double pushX, pushY, chaseAngle, nudgeAngle, wanderAngle;
     private double damageScale = 1.0;
-    private double wanderAngle;
-    private int wanderTimer;
+    private boolean raiding, provoked;
+    private final List<Bullet> pendingShots = new ArrayList<>();
 
-    /**
-     * @param hpMultiplier wave/difficulty scaling for health (1.0 = base value)
-     */
     public Monster(GameData.MonsterType type, double x, double y, GameMap map, Player target, double hpMultiplier) {
         super(x, y, type.hitboxW, type.hitboxH, Math.max(1, (int) Math.round(type.maxHp * hpMultiplier)), type.speed);
         this.type = type;
@@ -70,38 +41,30 @@ public final class Monster extends Entity {
         this.hitFrames = AssetLoader.loadStrip(type.hitStrip(), 3);
         this.deathFrames = AssetLoader.loadStrip(type.deathStrip(), 8);
         this.aimFrames = type == GameData.MonsterType.BANDIT_SHOOTER ? AssetLoader.loadStrip("characters/bandit_idle.png", 6) : runFrames;
-        // spread out the timers so a big wave does not attack/shoot/re-path on the same tick
         int seed = (int) (x * 7 + y * 13);
         this.animTimer = Math.floorMod(seed, 64);
         this.repathTimer = Math.floorMod(seed, 6);
         this.rangedCooldown = GameData.msToTicks(type.rangedCooldownMs / 2 + Math.floorMod(seed, 900));
         this.strafeSign = (seed & 1) == 0 ? 1 : -1;
-        this.raiding = (type == GameData.MonsterType.ZOMBIE_BOSS);
-        this.wanderAngle = (Math.floorMod(seed, 360)) * Math.PI / 180.0;
+        this.raiding = type == GameData.MonsterType.ZOMBIE_BOSS;
+        this.wanderAngle = Math.floorMod(seed, 360) * Math.PI / 180.0;
         this.wanderTimer = 40 + Math.floorMod(seed, 50);
         this.chaseAngle = target == null ? 0 : Math.atan2(target.getY() - y, target.getX() - x);
-        if (map != null) {
-            pushOutOfWalls();   // safety net if a caller spawns it on a blocked spot
-        }
+        if (map != null) pushOutOfWalls();
     }
 
-    /** Scales movement speed and attack damage according to chamber depth and difficulty. */
     public void applyChamberScaling(double speedScale, double dmgScale) {
         this.speed = type.speed * Math.max(0.4, speedScale);
         this.damageScale = Math.max(0.25, dmgScale);
     }
 
-    public GameData.MonsterType getType() {
-        return type;
-    }
-
-    public boolean isRaiding() {
-        return raiding;
-    }
-
-    public void setRaiding(boolean raiding) {
-        this.raiding = raiding;
-    }
+    public GameData.MonsterType getType() { return type; }
+    public void setRaiding(boolean raiding) { this.raiding = raiding; }
+    public Bullet takeProjectile() { return pendingShots.isEmpty() ? null : pendingShots.remove(0); }
+    public void applySlow(int ticks) { slowTicks = Math.max(slowTicks, ticks); }
+    private int deathAnimTicks() { return deathFrames.length * 5; }
+    public boolean isRemovable() { return !alive && deathTick >= deathAnimTicks() + CORPSE_TICKS; }
+    @Override public double getSortY() { return alive ? getFeetY() : getFeetY() - 24; }
 
     // ------------------------------------------------------------------ simulation
     @Override
@@ -117,35 +80,23 @@ public final class Monster extends Entity {
         if (hitAnim > 0) hitAnim--;
         if (slowTicks > 0) slowTicks--;
         if (lungeTicks > 0) lungeTicks--;
-
-        // knockback slides the body back, then fades out
         if (Math.abs(pushX) + Math.abs(pushY) > 0.05) {
             moveWithCollision(pushX, pushY);
             pushX *= 0.7;
             pushY *= 0.7;
         }
-        if (target == null || !target.isAlive()) {
-            return;
-        }
+        if (target == null || !target.isAlive()) return;
         double dist = distanceTo(target);
         facingLeft = target.getX() < x;
-        if (hitAnim > 0) {
-            return;   // staggered while the hit animation plays
-        }
-        if (aimWarning == 0) {
-            moveTowardsTarget(dist);   // a bandit stands still while it aims (fair warning)
-        }
+        if (hitAnim > 0) return;
+        if (aimWarning == 0) moveTowardsTarget(dist);
         updateRangedAttack(dist);
     }
 
-    /** Walks towards the player when raiding or aggroed; otherwise patrols outer zones outside Safe Camp. */
     private void moveTowardsTarget(double dist) {
-        boolean playerInCamp = targetIsInCamp();
-        if (!raiding && dist > 260.0) {
-            provoked = false;
-        }
+        if (!raiding && dist > 260.0) provoked = false;
         double aggroRange = (map != null && !map.hasSafeCamp()) ? 9999.0 : (provoked ? 225.0 : 130.0);
-        if (!raiding && (playerInCamp || dist > aggroRange)) {
+        if (!raiding && (targetIsInCamp() || dist > aggroRange)) {
             wanderOuterZone();
             return;
         }
@@ -153,22 +104,22 @@ public final class Monster extends Entity {
             repathTimer = 6;
             chaseAngle = map == null ? angleTo(target) : map.getChaseAngle(x, getFeetY() - 4, target.getX(), target.getFeetY() - 4, width);
         }
-        double moveAngle = chaseAngle;
         if (type == GameData.MonsterType.ZOMBIE_RUNNER && lungeTicks == 0
                 && dist < 165.0 && dist > 28.0 && ((animTimer + (int) Math.abs(x)) % 58 == 0)) {
             lungeTicks = 24;
         }
-        double enrageMult = (hp * 100 < maxHp * 50) ? 1.28 : 1.0;
-        double moveSpeed = (slowTicks > 0 ? speed * 0.65 : speed) * (lungeTicks > 0 ? 1.65 : 1.0) * enrageMult;
+        double moveSpeed = (slowTicks > 0 ? speed * 0.65 : speed) * (lungeTicks > 0 ? 1.65 : 1.0)
+                * ((hp * 100 < maxHp * 50) ? 1.28 : 1.0);
+        double moveAngle = chaseAngle;
         if (type.preferredDistance > 0) {
             if (dist < type.preferredDistance * 0.75) {
-                moveAngle = angleTo(target) + Math.PI;              // too close: back off
+                moveAngle = angleTo(target) + Math.PI;
             } else if (dist < type.preferredDistance * 1.15) {
-                moveAngle = angleTo(target) + strafeSign * Math.PI / 2;   // in range: circle
+                moveAngle = angleTo(target) + strafeSign * Math.PI / 2;
                 moveSpeed *= 0.6;
             }
         } else if (dist < 6) {
-            return;   // already hugging the player
+            return;
         }
         if (nudgeTicks > 0) {
             nudgeTicks--;
@@ -177,12 +128,10 @@ public final class Monster extends Entity {
         double oldX = x, oldY = y;
         moveWithCollision(Math.cos(moveAngle) * moveSpeed, Math.sin(moveAngle) * moveSpeed);
         if (Math.hypot(x - oldX, y - oldY) > moveSpeed * 0.3) {
-            stuckTicks = 0;   // moving (sliding along a wall counts as moving)
+            stuckTicks = 0;
             return;
         }
-        // barely moving: after a short while, step sideways for a moment so we do not grind on a corner
-        stuckTicks++;
-        if (stuckTicks > 12) {
+        if (++stuckTicks > 12) {
             stuckTicks = 0;
             strafeSign = -strafeSign;
             nudgeAngle = chaseAngle + strafeSign * Math.PI / 2;
@@ -191,11 +140,10 @@ public final class Monster extends Entity {
         }
     }
 
-    /** Roams outer zones during scavenge phase without entering the player's safe base camp. */
     private void wanderOuterZone() {
         if (--wanderTimer <= 0) {
             wanderTimer = 45 + (int) ((animTimer * 17L + (long) x) % 60);
-            wanderAngle += (((animTimer & 1) == 0) ? 1 : -1) * (0.7 + ((animTimer % 5) * 0.25));
+            wanderAngle += (((animTimer & 1) == 0) ? 1 : -1) * (0.7 + (animTimer % 5) * 0.25);
         }
         if (map != null) {
             Rectangle safe = map.getCampArea();
@@ -204,8 +152,7 @@ public final class Monster extends Entity {
                 wanderAngle = Math.atan2(y - safe.getCenterY(), x - safe.getCenterX());
             }
         }
-        double oldX = x, oldY = y;
-        double step = speed * 0.52;
+        double oldX = x, oldY = y, step = speed * 0.52;
         moveWithCollision(Math.cos(wanderAngle) * step, Math.sin(wanderAngle) * step);
         facingLeft = Math.cos(wanderAngle) < 0;
         if (Math.hypot(x - oldX, y - oldY) < step * 0.25) {
@@ -214,36 +161,14 @@ public final class Monster extends Entity {
         }
     }
 
-    /** Ranged monsters fire when the player is in range and in sight; bandits show a "!" first. */
     private void updateRangedAttack(double dist) {
-        if (type.rangedProjectile == null) {
-            return;
-        }
-        boolean playerInCamp = targetIsInCamp();
-        if (!raiding && playerInCamp) {
+        if (type.rangedProjectile == null) return;
+        if (!raiding && targetIsInCamp()) {
             aimWarning = 0;
             return;
         }
         if (aimWarning > 0) {
-            aimWarning--;
-            if (aimWarning == 0) {
-                double a = angleTo(target);
-                if (type == GameData.MonsterType.ZOMBIE_BOSS) {
-                    int dmg = Math.max(6, (int) Math.round((type.damage / 2.0) * damageScale));
-                    queueEnemyVolley(a, 7, 0.24, dmg, 10, "boss_roar");
-                    lungeTicks = 38;
-                } else if (type == GameData.MonsterType.ZOMBIE_TOXIC) {
-                    int dmg = Math.max(6, (int) Math.round((type.damage * 0.75) * damageScale));
-                    queueEnemyVolley(a, 3, 0.20, dmg, 8, "toxic_spit");
-                } else if (type == GameData.MonsterType.BANDIT_SHOOTER) {
-                    int dmg = Math.max(7, (int) Math.round((type.damage * 0.80) * damageScale));
-                    queueEnemyVolley(a, 2, 0.14, dmg, 8, "enemy_shoot");
-                } else {
-                    String sfx = type.rangedProjectile == GameData.Projectile.TOXIC_SPIT ? "toxic_spit" : "enemy_shoot";
-                    int dmg = Math.max(5, (int) Math.round(type.damage * damageScale));
-                    queueEnemyVolley(a, 1, 0.0, dmg, 8, sfx);
-                }
-            }
+            if (--aimWarning == 0) fireVolley(angleTo(target));
             return;
         }
         boolean inSight = map == null || map.hasClearPath(x, y, target.getX(), target.getY());
@@ -252,13 +177,24 @@ public final class Monster extends Entity {
         }
     }
 
-    private boolean targetIsInCamp() {
-        return map != null && map.hasSafeCamp() && target != null
-                && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+    private void fireVolley(double angle) {
+        switch (type) {
+            case ZOMBIE_BOSS -> {
+                queueEnemyVolley(angle, 7, 0.24, Math.max(6, (int) Math.round((type.damage / 2.0) * damageScale)), 10, "boss_roar");
+                lungeTicks = 38;
+            }
+            case ZOMBIE_TOXIC -> queueEnemyVolley(angle, 3, 0.20, Math.max(6, (int) Math.round((type.damage * 0.75) * damageScale)), 8, "toxic_spit");
+            case BANDIT_SHOOTER -> queueEnemyVolley(angle, 2, 0.14, Math.max(7, (int) Math.round((type.damage * 0.80) * damageScale)), 8, "enemy_shoot");
+            default -> queueEnemyVolley(angle, 1, 0.0, Math.max(5, (int) Math.round(type.damage * damageScale)), 8,
+                    type.rangedProjectile == GameData.Projectile.TOXIC_SPIT ? "toxic_spit" : "enemy_shoot");
+        }
     }
 
-    private void queueEnemyVolley(double centerAngle, int count, double stepRad,
-            int damage, double spawnOffset, String sound) {
+    private boolean targetIsInCamp() {
+        return map != null && map.hasSafeCamp() && target != null && map.getCampArea().contains((int) target.getX(), (int) target.getY());
+    }
+
+    private void queueEnemyVolley(double centerAngle, int count, double stepRad, int damage, double spawnOffset, String sound) {
         double start = -0.5 * (count - 1);
         for (int i = 0; i < count; i++) {
             double ang = centerAngle + (start + i) * stepRad;
@@ -271,38 +207,17 @@ public final class Monster extends Entity {
         AssetLoader.playSound(sound);
     }
 
-    /** Bites the player if touching and the bite cooldown is over. Returns the damage to apply (0 = none). */
     public int tryContactAttack() {
-        if (!alive || target == null || !target.isAlive() || attackCooldown > 0) {
-            return 0;
-        }
+        if (!alive || target == null || !target.isAlive() || attackCooldown > 0) return 0;
         Rectangle reach = getBounds();
         reach.grow(3, 3);
-        if (!reach.intersects(target.getBounds())) {
-            return 0;
-        }
+        if (!reach.intersects(target.getBounds())) return 0;
         attackCooldown = GameData.msToTicks(type.attackCooldownMs);
         return Math.max(1, (int) Math.round(type.damage * damageScale));
     }
 
-    /** One queued projectile fired by this monster, or null when empty. */
-    public Bullet takeProjectile() {
-        return pendingShots.isEmpty() ? null : pendingShots.remove(0);
-    }
-
-    /** True while the bandit is about to shoot (GamePanel may show the "!" bubble / play a sound). */
-    public boolean isAiming() {
-        return aimWarning > 1;
-    }
-
-    /**
-     * Applies a hit: damage, a white flash, minimal stagger (no stunlock) and push.
-     * Returns true if this hit killed the monster.
-     */
     public boolean takeHit(int damage, double pushAngle, double pushPixels) {
-        if (!alive) {
-            return false;
-        }
+        if (!alive) return false;
         provoked = true;
         takeDamage(damage);
         hitFlash = HIT_FLASH_TICKS;
@@ -310,9 +225,7 @@ public final class Monster extends Entity {
         pushX += Math.cos(pushAngle) * pushPixels * resist;
         pushY += Math.sin(pushAngle) * pushPixels * resist;
         if (alive) {
-            if (type != GameData.MonsterType.ZOMBIE_BOSS && type != GameData.MonsterType.ZOMBIE_RUNNER) {
-                hitAnim = 2;
-            }
+            if (type != GameData.MonsterType.ZOMBIE_BOSS && type != GameData.MonsterType.ZOMBIE_RUNNER) hitAnim = 2;
             AssetLoader.playSound("hit");
         } else {
             deathTick = 0;
@@ -322,11 +235,6 @@ public final class Monster extends Entity {
         return !alive;
     }
 
-    public void applySlow(int ticks) {
-        slowTicks = Math.max(slowTicks, ticks);
-    }
-
-    /** Scarce roguelike loot roll: multiplicative luck scaling and max 1 drop per non-boss kill. */
     public List<DroppedItem> rollDrops(Random rng, int lootBonusPercent) {
         List<DroppedItem> list = new ArrayList<>();
         GameData.Drop[] pool = type.getDrops();
@@ -341,29 +249,12 @@ public final class Monster extends Entity {
                 item.setMap(map);
                 item.scatter(rng);
                 list.add(item);
-                if (type != GameData.MonsterType.ZOMBIE_BOSS) {
-                    break;
-                }
+                if (type != GameData.MonsterType.ZOMBIE_BOSS) break;
             }
         }
         return list;
     }
 
-    /** Dead, death animation done and the corpse has faded: take it out of the list. */
-    public boolean isRemovable() {
-        return !alive && deathTick >= deathAnimTicks() + CORPSE_TICKS;
-    }
-
-    /** True while the death animation is still playing (corpse not yet lying still). */
-    public boolean isDying() {
-        return !alive && deathTick < deathAnimTicks();
-    }
-
-    private int deathAnimTicks() {
-        return deathFrames.length * 5;
-    }
-
-    /** Gently pushes overlapping living monsters apart so a horde does not merge into one sprite. */
     public static void separate(List<Monster> monsters) {
         int n = monsters.size();
         for (int i = 0; i < n; i++) {
@@ -372,9 +263,7 @@ public final class Monster extends Entity {
             for (int j = i + 1; j < n; j++) {
                 Monster b = monsters.get(j);
                 if (!b.alive) continue;
-                double dx = b.x - a.x, dy = b.y - a.y;
-                double minDist = (a.width + b.width) * 0.5;
-                double d2 = dx * dx + dy * dy;
+                double dx = b.x - a.x, dy = b.y - a.y, minDist = (a.width + b.width) * 0.5, d2 = dx * dx + dy * dy;
                 if (d2 >= minDist * minDist) continue;
                 double d = Math.sqrt(d2);
                 if (d < 0.01) {
@@ -382,9 +271,7 @@ public final class Monster extends Entity {
                     dy = 0;
                     d = 1;
                 }
-                // weaker than walking speed, so a crowd squeezing through a door still makes progress
-                double push = Math.min(0.3, (minDist - d) * 0.2);
-                double px = dx / d * push, py = dy / d * push;
+                double push = Math.min(0.3, (minDist - d) * 0.2), px = dx / d * push, py = dy / d * push;
                 a.moveWithCollision(-px, -py);
                 b.moveWithCollision(px, py);
             }
@@ -400,68 +287,42 @@ public final class Monster extends Entity {
             return;
         }
         drawShadow(g2, (int) (16 * scale));
-        BufferedImage frame;
-        if (hitAnim > 0) {
-            frame = hitFrames[Math.min(hitFrames.length - 1, (8 - hitAnim) / 3)];
-        } else if (aimWarning > 0) {
-            frame = aimFrames[(animTimer / 6) % aimFrames.length];
-        } else {
-            frame = runFrames[(animTimer / 5) % runFrames.length];
-        }
+        BufferedImage frame = hitAnim > 0 ? hitFrames[Math.min(hitFrames.length - 1, (8 - hitAnim) / 3)]
+                : aimWarning > 0 ? aimFrames[(animTimer / 6) % aimFrames.length]
+                : runFrames[(animTimer / 5) % runFrames.length];
         drawFrame(g2, frame, scale, facingLeft);
-        if (hitFlash > 0 && hitAnim == 0) {
-            // the boss has no stagger animation, so it gets a white flash overlay instead
-            drawFlash(g2, frame, scale, facingLeft, hitFlash / (float) HIT_FLASH_TICKS);
-        }
-        if (type == GameData.MonsterType.ZOMBIE_TOXIC) {
-            drawToxicDrip(g2);
-        }
+        if (hitFlash > 0 && hitAnim == 0) drawFlash(g2, frame, scale, facingLeft, hitFlash / (float) HIT_FLASH_TICKS);
+        if (type == GameData.MonsterType.ZOMBIE_TOXIC) drawToxicDrip(g2);
         if (aimWarning > 1) {
             BufferedImage[] alert = AssetLoader.getAlertFrames();
-            int f = Math.min(alert.length - 1, (24 - aimWarning) / 3);
-            g2.drawImage(alert[f], (int) x - 10, (int) (getFeetY() - 32 * scale) - 18, null);
+            g2.drawImage(alert[Math.min(alert.length - 1, (24 - aimWarning) / 3)], (int) x - 10, (int) (getFeetY() - 32 * scale) - 18, null);
         }
-        if (hp < maxHp) {
-            drawHealthBar(g2, scale);
-        }
+        if (hp < maxHp) drawHealthBar(g2, scale);
     }
 
-    /** Small bobbing green drops around the toxic zombie. */
     private void drawToxicDrip(Graphics2D g2) {
         g2.setColor(new Color(150, 230, 40, 150));
         for (int i = 0; i < 3; i++) {
             double t = (animTimer + i * 17) % 50 / 50.0;
-            int px = (int) (x - 7 + i * 7);
-            int py = (int) (y - 6 + t * 16);
-            g2.fillRect(px, py, 2, 2);
+            g2.fillRect((int) (x - 7 + i * 7), (int) (y - 6 + t * 16), 2, 2);
         }
     }
 
     private void drawHealthBar(Graphics2D g2, double scale) {
-        int w = (int) (18 * scale);
-        int top = (int) (getFeetY() - 30 * scale) - 4;
-        int left = (int) x - w / 2;
+        int w = (int) (18 * scale), top = (int) (getFeetY() - 30 * scale) - 4, left = (int) x - w / 2;
         g2.setColor(new Color(20, 10, 10, 200));
         g2.fillRect(left - 1, top - 1, w + 2, 4);
         g2.setColor(type == GameData.MonsterType.ZOMBIE_BOSS ? new Color(230, 120, 20) : new Color(210, 40, 40));
         g2.fillRect(left, top, Math.max(1, w * hp / maxHp), 2);
     }
 
-    /** Death animation, then the last frame lying on the ground, fading at the end. */
     private void drawCorpse(Graphics2D g2, double scale) {
-        int animTicks = deathAnimTicks();
         BufferedImage frame = deathFrames[Math.min(deathFrames.length - 1, deathTick / 5)];
-        int left = animTicks + CORPSE_TICKS - deathTick;
+        int left = deathAnimTicks() + CORPSE_TICKS - deathTick;
         float alpha = left < FADE_TICKS ? Math.max(0f, left / (float) FADE_TICKS) : 1f;
         Composite old = g2.getComposite();
         g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
         drawFrame(g2, frame, scale, facingLeft);
         g2.setComposite(old);
-    }
-
-    /** Corpses lie flat on the ground, so they are drawn behind standing things. */
-    @Override
-    public double getSortY() {
-        return alive ? getFeetY() : getFeetY() - 24;
     }
 }

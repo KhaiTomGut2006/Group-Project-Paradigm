@@ -18,44 +18,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Everything that flies and hurts: player bullets, rockets, grenades, enemy bullets, toxic spit,
- * and the invisible "slash" of a melee swing (a very short-lived hitbox in front of the player).
- *
- * How GamePanel uses a bullet each tick:
- *   b.update();
- *   for each monster m: if (b.tryHit(m)) m.takeHit(b.getDamage(), b.getAngle(), b.getKnockback());
- *   if (b.consumeExplosion()) ... area damage around b with radius b.getBlastRadius()
- *   if (b.consumeWallHit()) ... impact sparks at b
- *   remove b when !b.isAlive()
- * tryHit remembers who was already hit, so a piercing bullet or a slash damages each monster once.
+ * Projectiles and melee arcs: bullets, rockets, arcing grenades, enemy shots, and melee slashes.
  */
 public final class Bullet extends Entity {
 
     private final GameData.Projectile kind;
     private final BufferedImage sprite;
-    private final boolean hostile;          // true = fired by a monster, hurts the player
-    private final int damage;
-    private final double angle;
-    private final double vx, vy;
-    private final double maxRange;
-    private final boolean explosive;
-    private final int blastRadius;
-    private final int knockback;
-    private int pierceLeft;
-    private double travelled;
-    private final List<Entity> alreadyHit = new ArrayList<>();
-    private boolean explosionPending;
-    private boolean wallHitPending;
-
-    // melee slash: follows its owner for a few ticks and hits everything inside the arc
+    private final boolean hostile, explosive;
+    private final int damage, blastRadius, knockback, maxLife;
+    private final double angle, vx, vy, maxRange, arcRad, targetX, targetY;
     private final Entity owner;
-    private final double arcRad;
-    private int lifeTicks;
-    private final int maxLife;
+    private final List<Entity> alreadyHit = new ArrayList<>();
 
-    // grenade: flies in an arc to a target point and explodes there
-    private final double targetX, targetY;
-    private double height;
+    private int pierceLeft, lifeTicks;
+    private double travelled, height;
+    private boolean explosionPending, wallHitPending;
 
     private Bullet(GameData.Projectile kind, double x, double y, double angle, double speed, int damage,
                    double maxRange, boolean hostile, boolean explosive, int blastRadius, int pierce,
@@ -81,25 +58,21 @@ public final class Bullet extends Entity {
     }
 
     // ------------------------------------------------------------------ factories
-    /** A bullet/rocket fired by the player with weapon w (damage already includes upgrades). */
     public static Bullet shot(double x, double y, double angle, GameData.WeaponType w, int damage) {
         return shot(x, y, angle, w, damage, 1.0, 0);
     }
 
-    /** A bullet/rocket fired by the player with run-perk speed multiplier and bonus pierce. */
     public static Bullet shot(double x, double y, double angle, GameData.WeaponType w, int damage,
                               double speedMult, int bonusPierce) {
         return new Bullet(w.projectile(), x, y, angle, w.bulletSpeed * speedMult, damage, w.range, false,
                 w.explosive, w.blastRadius, w.pierce + bonusPierce, null, 0, 0, 0, 0);
     }
 
-    /** The invisible hitbox of a knife/axe swing in front of the owner. */
     public static Bullet melee(Entity owner, double angle, GameData.WeaponType w, int damage) {
         return new Bullet(GameData.Projectile.SLASH, owner.getX(), owner.getY(), angle, 0, damage, w.range, false,
                 false, 0, 99, owner, Math.toRadians(w.spreadDeg), 6, 0, 0);
     }
 
-    /** A thrown grenade that lands on (targetX, targetY) - at most 200 px away - and explodes. */
     public static Bullet grenade(double x, double y, double targetX, double targetY) {
         double dist = Math.min(200, Math.hypot(targetX - x, targetY - y));
         double a = Math.atan2(targetY - y, targetX - x);
@@ -109,7 +82,6 @@ public final class Bullet extends Entity {
                 true, GameData.GRENADE_BLAST_RADIUS, 0, null, 0, flight, tx, ty);
     }
 
-    /** A projectile fired by a monster (bandit bullet, toxic spit). */
     public static Bullet enemyShot(double x, double y, double angle, GameData.Projectile kind, int damage, double range) {
         double speed = kind == GameData.Projectile.TOXIC_SPIT ? 5.4 : 6.8;
         return new Bullet(kind, x, y, angle, speed, damage, range, true, false, 0, 0, null, 0, 0, 0, 0);
@@ -118,112 +90,75 @@ public final class Bullet extends Entity {
     // ------------------------------------------------------------------ simulation
     @Override
     public void update() {
-        if (!alive) {
-            return;
-        }
+        if (!alive) return;
         animTimer++;
         switch (kind) {
-            case SLASH -> updateSlash();
-            case GRENADE -> updateGrenade();
-            default -> updateFlying();
+            case SLASH -> {
+                x = owner.getX();
+                y = owner.getY();
+                if (++lifeTicks >= maxLife) alive = false;
+            }
+            case GRENADE -> {
+                lifeTicks++;
+                x += vx;
+                y += vy;
+                height = Math.sin(Math.PI * Math.min(1.0, lifeTicks / (double) maxLife)) * 34;
+                if (lifeTicks >= maxLife) {
+                    x = targetX;
+                    y = targetY;
+                    height = 0;
+                    end(true);
+                }
+            }
+            default -> {
+                x += vx;
+                y += vy;
+                travelled += speed;
+                if (map != null && map.isBlocked(new Rectangle((int) x - 2, (int) y - 2, 4, 4))) {
+                    wallHitPending = true;
+                    end(explosive);
+                } else if (travelled >= maxRange) {
+                    end(explosive);
+                }
+            }
         }
     }
 
-    private void updateSlash() {
-        // stick to the owner so the swing moves with the player
-        x = owner.getX();
-        y = owner.getY();
-        lifeTicks++;
-        if (lifeTicks >= maxLife) {
-            alive = false;
-        }
-    }
-
-    private void updateGrenade() {
-        lifeTicks++;
-        double t = lifeTicks / (double) maxLife;
-        x += vx;
-        y += vy;
-        height = Math.sin(Math.PI * Math.min(1.0, t)) * 34;   // up and down again
-        if (lifeTicks >= maxLife) {
-            x = targetX;
-            y = targetY;
-            height = 0;
-            end(true);
-        }
-    }
-
-    private void updateFlying() {
-        x += vx;
-        y += vy;
-        travelled += speed;
-        if (map != null && map.isBlocked(new Rectangle((int) x - 2, (int) y - 2, 4, 4))) {
-            wallHitPending = true;
-            end(explosive);
-        } else if (travelled >= maxRange) {
-            end(explosive);
-        }
-    }
-
-    /** Stops the bullet; an explosive one leaves an explosion for GamePanel to pick up. */
     private void end(boolean explode) {
         alive = false;
-        if (explode && explosive) {
-            explosionPending = true;
-        }
+        if (explode && explosive) explosionPending = true;
     }
 
-    /**
-     * Checks one target. Returns true exactly once per target when this bullet hits it, and
-     * uses up the bullet unless it still has pierce left. Grenades never hit directly (they explode).
-     */
     public boolean tryHit(Entity target) {
         if (!alive || target == null || !target.isAlive() || kind == GameData.Projectile.GRENADE || alreadyHit.contains(target)) {
             return false;
         }
-        boolean hit = isMelee() ? isInsideArc(target) : projectileBounds().intersects(target.getBounds());
-        if (!hit) {
-            return false;
-        }
+        int r = kind.radius;
+        boolean hit = isMelee() ? isInsideArc(target) : new Rectangle((int) (x - r), (int) (y - r), r * 2, r * 2).intersects(target.getBounds());
+        if (!hit) return false;
         alreadyHit.add(target);
-        if (isMelee()) {
-            return true;
-        }
-        if (explosive) {
-            end(true);
-        } else if (pierceLeft > 0) {
-            pierceLeft--;
-        } else {
-            alive = false;
-        }
+        if (isMelee()) return true;
+        if (explosive) end(true);
+        else if (pierceLeft > 0) pierceLeft--;
+        else alive = false;
         return true;
     }
 
-    private Rectangle projectileBounds() {
-        int radius = kind.radius;
-        return new Rectangle((int) (x - radius), (int) (y - radius), radius * 2, radius * 2);
-    }
-
-    /** A target is inside the swing if it is within reach and within half the arc of the swing direction. */
     private boolean isInsideArc(Entity target) {
         double reach = maxRange + Math.max(target.getWidth(), target.getHeight()) / 2.0;
         double dist = Math.hypot(target.getX() - x, target.getY() - y);
-        if (dist > reach) {
-            return false;
-        }
+        if (dist > reach) return false;
         double toTarget = Math.atan2(target.getY() - y, target.getX() - x);
         double diff = Math.abs(Math.atan2(Math.sin(toTarget - angle), Math.cos(toTarget - angle)));
         return diff <= arcRad / 2 || dist < 10;
     }
 
-    /** True once, after an explosive bullet ended (rocket hit, wall, max range, grenade landed). */
     public boolean consumeExplosion() {
         boolean e = explosionPending;
         explosionPending = false;
         return e;
     }
 
-    /** True once, after the bullet stopped against a wall or prop (for impact sparks). */
     public boolean consumeWallHit() {
         boolean w = wallHitPending;
         wallHitPending = false;
@@ -231,57 +166,24 @@ public final class Bullet extends Entity {
     }
 
     // ------------------------------------------------------------------ getters
-    public GameData.Projectile getKind() {
-        return kind;
-    }
-
-    public int getDamage() {
-        return damage;
-    }
-
-    /** Travel (or swing) direction in radians; monsters are pushed this way. */
-    public double getAngle() {
-        return angle;
-    }
-
-    /** How many pixels a monster is pushed back by this hit. */
-    public int getKnockback() {
-        return knockback;
-    }
-
-    public boolean isHostile() {
-        return hostile;
-    }
-
-    public boolean isExplosive() {
-        return explosive;
-    }
-
-    public int getBlastRadius() {
-        return blastRadius;
-    }
-
-    public boolean isMelee() {
-        return kind == GameData.Projectile.SLASH;
-    }
-
-    /** Toxic spit poisons the player for a while (number of ticks), other bullets do not. */
-    public int getPoisonTicks() {
-        return kind == GameData.Projectile.TOXIC_SPIT ? GameData.msToTicks(3000) : 0;
-    }
+    public int getDamage() { return damage; }
+    public double getAngle() { return angle; }
+    public int getKnockback() { return knockback; }
+    public boolean isHostile() { return hostile; }
+    public int getBlastRadius() { return blastRadius; }
+    public boolean isMelee() { return kind == GameData.Projectile.SLASH; }
+    public int getPoisonTicks() { return kind == GameData.Projectile.TOXIC_SPIT ? GameData.msToTicks(3000) : 0; }
+    @Override public double getSortY() { return y + (isMelee() ? 20 : 0); }
 
     // ------------------------------------------------------------------ drawing
     @Override
     public void draw(Graphics2D g2) {
-        if (!alive) {
-            return;
-        }
-        if (kind == GameData.Projectile.SLASH) {
+        if (!alive) return;
+        if (isMelee()) {
             drawSlash(g2);
             return;
         }
         if (kind == GameData.Projectile.GRENADE) {
-            // shadow stays on the ground while the grenade flies up
             g2.setColor(new Color(0, 0, 0, 70));
             g2.fillOval((int) x - 4, (int) y - 1, 8, 4);
         }
@@ -293,8 +195,7 @@ public final class Bullet extends Entity {
             g2.setStroke(old);
         }
         AffineTransform old = g2.getTransform();
-        double drawY = y - height;
-        g2.translate(x, drawY);
+        g2.translate(x, y - height);
         double spin = kind == GameData.Projectile.GRENADE ? animTimer * 0.35 : angle;
         if (kind == GameData.Projectile.TOXIC_SPIT) {
             double pulse = 1.0 + 0.12 * Math.sin(animTimer * 0.5);
@@ -306,30 +207,19 @@ public final class Bullet extends Entity {
         g2.setTransform(old);
     }
 
-    /** A fading white crescent along the swing arc. */
     private void drawSlash(Graphics2D g2) {
         float life = 1f - lifeTicks / (float) maxLife;
         Composite oldC = g2.getComposite();
         Stroke oldS = g2.getStroke();
         g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, Math.max(0f, 0.75f * life)));
         g2.setColor(Color.WHITE);
-        double reach = maxRange;
-        double sweep = Math.toDegrees(arcRad);
-        double progress = Math.min(1.0, lifeTicks / 4.0);    // the arc grows during the first ticks
+        double sweep = Math.toDegrees(arcRad), progress = Math.min(1.0, lifeTicks / 4.0);
         double start = -Math.toDegrees(angle) - sweep / 2;
         g2.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-        g2.draw(new Arc2D.Double(x - reach * 0.8, y - reach * 0.8, reach * 1.6, reach * 1.6,
-                start, sweep * progress, Arc2D.OPEN));
+        g2.draw(new Arc2D.Double(x - maxRange * 0.8, y - maxRange * 0.8, maxRange * 1.6, maxRange * 1.6, start, sweep * progress, Arc2D.OPEN));
         g2.setStroke(new BasicStroke(1.5f));
-        g2.draw(new Arc2D.Double(x - reach * 0.55, y - reach * 0.55, reach * 1.1, reach * 1.1,
-                start, sweep * progress, Arc2D.OPEN));
+        g2.draw(new Arc2D.Double(x - maxRange * 0.55, y - maxRange * 0.55, maxRange * 1.1, maxRange * 1.1, start, sweep * progress, Arc2D.OPEN));
         g2.setComposite(oldC);
         g2.setStroke(oldS);
-    }
-
-    /** Bullets are drawn above everything on the ground, so they sort by their own y. */
-    @Override
-    public double getSortY() {
-        return y + (kind == GameData.Projectile.SLASH ? 20 : 0);
     }
 }
