@@ -14,9 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Enemy entity driven by GameData.MonsterType stats and animations (Zombie, Runner, Toxic, Bandit, Boss).
- */
 public final class Monster extends Entity {
 
     private static final int CORPSE_TICKS = 150, FADE_TICKS = 40, HIT_FLASH_TICKS = 6;
@@ -66,7 +63,6 @@ public final class Monster extends Entity {
     public boolean isRemovable() { return !alive && deathTick >= deathAnimTicks() + CORPSE_TICKS; }
     @Override public double getSortY() { return alive ? getFeetY() : getFeetY() - 24; }
 
-    // ------------------------------------------------------------------ simulation
     @Override
     public void update() {
         animTimer++;
@@ -278,7 +274,6 @@ public final class Monster extends Entity {
         }
     }
 
-    // ------------------------------------------------------------------ drawing
     @Override
     public void draw(Graphics2D g2) {
         double scale = type.drawScale;

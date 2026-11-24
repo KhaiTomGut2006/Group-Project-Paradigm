@@ -17,9 +17,6 @@ import java.awt.image.BufferedImage;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Projectiles and melee arcs: bullets, rockets, arcing grenades, enemy shots, and melee slashes.
- */
 public final class Bullet extends Entity {
 
     private final GameData.Projectile kind;
@@ -57,7 +54,6 @@ public final class Bullet extends Entity {
         this.knockback = owner != null ? 1 : Math.min(6, 1 + damage / 12);
     }
 
-    // ------------------------------------------------------------------ factories
     public static Bullet shot(double x, double y, double angle, GameData.WeaponType w, int damage) {
         return shot(x, y, angle, w, damage, 1.0, 0);
     }
@@ -87,7 +83,6 @@ public final class Bullet extends Entity {
         return new Bullet(kind, x, y, angle, speed, damage, range, true, false, 0, 0, null, 0, 0, 0, 0);
     }
 
-    // ------------------------------------------------------------------ simulation
     @Override
     public void update() {
         if (!alive) return;
@@ -165,7 +160,6 @@ public final class Bullet extends Entity {
         return w;
     }
 
-    // ------------------------------------------------------------------ getters
     public int getDamage() { return damage; }
     public double getAngle() { return angle; }
     public int getKnockback() { return knockback; }
@@ -175,7 +169,6 @@ public final class Bullet extends Entity {
     public int getPoisonTicks() { return kind == GameData.Projectile.TOXIC_SPIT ? GameData.msToTicks(3000) : 0; }
     @Override public double getSortY() { return y + (isMelee() ? 20 : 0); }
 
-    // ------------------------------------------------------------------ drawing
     @Override
     public void draw(Graphics2D g2) {
         if (!alive) return;

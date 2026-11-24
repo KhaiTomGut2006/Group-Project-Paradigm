@@ -13,10 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Ground loot and supply chests. Normal items bob, pull towards the player via magnet radius,
- * and blink before expiring; CHEST opens when touched and bursts into random salvage.
- */
 public final class DroppedItem extends Entity {
 
     private static final int OPEN_TICKS = 6 * 5;

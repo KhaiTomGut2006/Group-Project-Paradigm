@@ -23,7 +23,6 @@ import java.awt.image.BufferedImage;
 import java.util.List;
 import java.util.function.IntSupplier;
 
-/** Draws screen-space overlays: night darkness pools, danger vignette, boss bar, minimap, crosshair, pause and game-over. */
 final class GameOverlay {
     private static final int SCALE = GameData.SCALE;
     private static final Color GLASS = new Color(14, 16, 20, 215), SCRIM = new Color(8, 9, 12, 165);

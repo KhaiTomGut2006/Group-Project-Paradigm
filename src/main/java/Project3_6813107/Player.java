@@ -18,9 +18,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/**
- * The survivor. Holds synchronized inventory, weapons, permanent workshop levels, and in-run perks.
- */
 public final class Player extends Entity {
 
     private static final int HURT_TICKS = 9, SWING_TICKS = 10, FLICKER_TICKS = 7 * 4, HINT_TICKS = 150;
@@ -78,7 +75,6 @@ public final class Player extends Entity {
         this.aimY = worldY;
     }
 
-    // ------------------------------------------------------------------ simulation
     @Override
     public void update() {
         animTimer++;
@@ -162,7 +158,6 @@ public final class Player extends Entity {
         return currentWeapon.shootFrames == 0 ? 1 : Math.max(1, Math.min(3, getCooldownTicks(currentWeapon) / currentWeapon.shootFrames));
     }
 
-    // ------------------------------------------------------------------ combat
     public synchronized List<Bullet> shoot(double targetX, double targetY) {
         List<Bullet> out = new ArrayList<>();
         if (!alive || fireCooldown > 0) return out;
@@ -269,7 +264,6 @@ public final class Player extends Entity {
         AssetLoader.playSound("gameover");
     }
 
-    // ------------------------------------------------------------------ inventory
     public synchronized String pickUp(DroppedItem item) {
         GameData.ItemType t = item.getType();
         item.markCollected();
@@ -287,7 +281,6 @@ public final class Player extends Entity {
 
     public synchronized Map<GameData.ItemType, Integer> getInventory() { return new EnumMap<>(inventory); }
 
-    // ------------------------------------------------------------------ weapons
     public synchronized GameData.WeaponType getCurrentWeapon() { return currentWeapon; }
     public synchronized GameData.WeaponType getEquippedPrimaryGun() { return equippedPrimaryGun; }
     public synchronized GameData.WeaponType getTempChamberWeapon() { return tempChamberWeapon; }
@@ -358,7 +351,6 @@ public final class Player extends Entity {
         switchWeapon(list.get(Math.floorMod(i + (direction >= 0 ? 1 : -1), list.size())));
     }
 
-    // ------------------------------------------------------------------ perks & hub reset
     public synchronized void addPerk(GameData.TacticalPerk perk) {
         if (perk == null) return;
         int prev = runPerks.get(perk);
@@ -398,7 +390,6 @@ public final class Player extends Entity {
                 ? equippedPrimaryGun : GameData.WeaponType.KNIFE;
     }
 
-    // ------------------------------------------------------------------ crafting
     public synchronized int getLevel(GameData.RecipeKind kind) { return levels.get(kind); }
 
     public synchronized Map<GameData.ItemType, Integer> getCost(GameData.UpgradeRecipe r) {
@@ -511,7 +502,6 @@ public final class Player extends Entity {
         return level;
     }
 
-    // ------------------------------------------------------------------ stats & getters
     public GameData.PlayerClass getPlayerClass() { return playerClass; }
     public String getPlayerName() { return settings.playerName; }
     public synchronized int getAmmo() { return inventory.get(GameData.ItemType.AMMO); }
@@ -550,7 +540,6 @@ public final class Player extends Entity {
         return GameData.msToTicks((int) Math.round(w.cooldownMs * mult));
     }
 
-    // ------------------------------------------------------------------ drawing
     @Override
     public void draw(Graphics2D g2) {
         if (!alive) {

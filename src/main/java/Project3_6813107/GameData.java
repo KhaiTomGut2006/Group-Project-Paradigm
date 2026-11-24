@@ -17,15 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/**
- * Game balance constants, enums (items, weapons, monsters, classes, maps, perks, recipes),
- * crafting recipes, and high-score persistence. Contains no Swing code.
- */
 public final class GameData {
 
     private GameData() {}
 
-    // ------------------------------------------------------------------ constants
     public static final int TILE = 32;
     public static final int SCALE = 2;
     public static final int GAME_W = 1100, GAME_H = 660, LAUNCHER_W = 900, LAUNCHER_H = 620;
@@ -86,7 +81,6 @@ public final class GameData {
         return Math.max(1, Math.round(ms / (float) TICK_MS));
     }
 
-    // ------------------------------------------------------------------ items
     public enum ItemType {
         SCRAPS("Scraps", "items/scraps.png"),
         WOOD("Wood", "items/wood.png"),
@@ -116,7 +110,6 @@ public final class GameData {
         }
     }
 
-    // ------------------------------------------------------------------ projectiles
     public enum Projectile {
         SMALL_BULLET(48, 80, 3),
         BIG_BULLET(16, 80, 3),
@@ -136,7 +129,6 @@ public final class GameData {
         }
     }
 
-    // ------------------------------------------------------------------ weapons
     public enum WeaponType {
         KNIFE("Survival Knife",          14, 230,  0.0, 1,  85, 0,  32, true,  99, false,  0, 3, 1, null,                         0, "swing"),
         AXE("Axe",                       26, 340,  0.0, 1, 110, 0,  36, true,  99, false,  0, 0, 1, null,                         0, "swing"),
@@ -203,7 +195,6 @@ public final class GameData {
         WeaponType.SHOTGUN, WeaponType.RIFLE, WeaponType.SNIPER, WeaponType.ROCKET_LAUNCHER
     };
 
-    // ------------------------------------------------------------------ monsters
     public static final class Drop {
         public final ItemType item;
         public final int chancePercent, min, max;
@@ -289,7 +280,6 @@ public final class GameData {
         public String deathStrip() { return "characters/" + spriteName + "_death.png"; }
     }
 
-    // ------------------------------------------------------------------ player classes
     public enum PlayerClass {
         SCAVENGER("Scavenger", "Bigger loot magnet and +20% drop chance.",              0, 1.0,  1.0,  1.0, 1.4,  1.0,  20,  0, 0, 0),
         SOLDIER("Soldier", "+15% damage, starts with extra ammo and a grenade.",        0, 1.15, 1.0,  1.0, 1.0,  1.0,   0, 40, 1, 0),
@@ -321,7 +311,6 @@ public final class GameData {
         @Override public String toString() { return displayName; }
     }
 
-    // ------------------------------------------------------------------ maps
     public enum MapType {
         WASTELAND_HIGHWAY("Wasteland Highway", "A broken desert highway full of wrecked cars.", 1001L),
         SURVIVOR_CAMP("Survivor Camp", "A fenced tent town with market stalls and farm plots.", 2002L),
@@ -341,7 +330,6 @@ public final class GameData {
         @Override public String toString() { return displayName; }
     }
 
-    // ------------------------------------------------------------------ settings
     public static class GameSettings {
         public String playerName = "Survivor";
         public PlayerClass playerClass = PlayerClass.SCAVENGER;
@@ -352,7 +340,6 @@ public final class GameData {
         public boolean autoFire, showHitbox, soundOn = true, musicOn = true, doubleSpawn;
     }
 
-    // ------------------------------------------------------------------ roguelite chambers and perks
     public enum ChamberType {
         SAFE_CAMP("Safe Camp Hub", "Prepare gear, talk to NPCs [B], and enter the Gate [F]"),
         TACTICAL_PERK("Tactical Perk", "Clear hostiles to choose 1 of 3 temporary Tactical Perks"),
@@ -391,7 +378,6 @@ public final class GameData {
         }
     }
 
-    // ------------------------------------------------------------------ crafting
     public enum RecipeKind {
         WEAPON(0), DAMAGE(0.12), FIRE_RATE(0.08), MAX_HP(20), SPEED(0.08),
         ARMOR(0.08), MAGNET(0.25), DEATH_DEFIANCE(1), BASE_TURRET(1),
@@ -473,7 +459,6 @@ public final class GameData {
                 RecipeKind.BASE_FARM, 3, null, null, ItemType.WOOD, 4, ItemType.SCRAPS, 5, ItemType.STEEL, 2)
     );
 
-    // ------------------------------------------------------------------ high scores
     static String formatRunTime(int seconds) {
         return String.format("%d:%02d", seconds / 60, seconds % 60);
     }

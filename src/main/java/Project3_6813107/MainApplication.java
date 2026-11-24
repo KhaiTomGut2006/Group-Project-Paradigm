@@ -51,14 +51,6 @@ import javax.swing.event.ChangeListener;
 import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 
-/**
- * Entry-point launcher window (900x620): animated camp preview + group members on the left,
- * tabbed Play / Options / Scores / Help controls on the right. Launches GameFrame on Start.
- *
- * Event handlers:
- *   actionPerformed(ActionEvent) - Start/Quit, tabs, 5 class radios, 5 check boxes, map combo, name field, timer
- *   stateChanged(ChangeEvent)    - difficulty and volume JSliders
- */
 public final class MainApplication extends JFrame implements ActionListener, ChangeListener {
 
     private static final long serialVersionUID = 1L;
@@ -68,7 +60,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private static final String[] DIFFICULTY_NAMES = {"Rookie", "Survivor", "Veteran", "Hardened", "Nightmare"};
     private static final String[] TAB_NAMES = {"Play", "Options", "Scores", "Help"};
 
-    // ---- Play tab components
     private Theme.KitField nameField;
     private JLabel nameHintLabel, difficultyInfoLabel;
     private JRadioButton[] classRadios = new JRadioButton[GameData.PlayerClass.values().length];
@@ -78,10 +69,8 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
     private JSlider difficultySlider, volumeSlider;
     private Theme.PixelLabel difficultyValueLabel, volumeValueLabel;
 
-    // ---- Options tab components
     private JCheckBox autoFireBox, doubleSpawnBox, hitboxBox, soundBox, musicBox;
 
-    // ---- Navigation, Scores & Animation
     private final JToggleButton[] tabButtons = new JToggleButton[TAB_NAMES.length];
     private final CardLayout tabCards = new CardLayout(), scoreCards = new CardLayout();
     private final JPanel tabPages = Theme.transparentPanel(tabCards), scorePages = Theme.transparentPanel(scoreCards);
@@ -115,7 +104,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         setLocationRelativeTo(null);
     }
 
-    // ================================================================== left side (preview + group names)
     private HeroPanel buildHeroPanel() {
         HeroPanel hero = new HeroPanel();
         hero.setPreferredSize(new Dimension(HERO_WIDTH, 10));
@@ -154,7 +142,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         return row;
     }
 
-    // ================================================================== right side (tabs + pages + Start/Quit)
     private JPanel buildRightColumn() {
         JPanel column = Theme.transparentPanel(new BorderLayout(0, 14));
         column.setBorder(new EmptyBorder(24, 26, 20, 26));
@@ -398,7 +385,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         }
     }
 
-    // ================================================================== event handlers
     @Override
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
@@ -447,7 +433,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         }
     }
 
-    // ================================================================== actions & helpers
     private void selectTab(int index) {
         tabButtons[index].setSelected(true);
         tabCards.show(tabPages, TAB_NAMES[index]);
@@ -583,7 +568,6 @@ public final class MainApplication extends JFrame implements ActionListener, Cha
         });
     }
 
-    // ================================================================== helper classes
     private static final class ScoreTableModel extends AbstractTableModel {
         private static final long serialVersionUID = 1L;
         private static final String[] COLUMNS = {"NO.", "SURVIVOR", "REGION", "#CHAMBER", "#KILLS", "#TIME"};

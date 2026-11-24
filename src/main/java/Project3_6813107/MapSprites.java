@@ -6,7 +6,6 @@ package Project3_6813107;
 
 import java.awt.image.BufferedImage;
 
-/** Sprite sheet coordinates and blocking footprints for map props placed by GameMap. */
 final class MapSprites {
     private MapSprites() {}
 
@@ -34,7 +33,6 @@ final class MapSprites {
     static final String CAMP = "tiles/camp.png";
     static final String INTER = "tiles/interior.png";
 
-    // Wasteland sheet: vehicles, crates, barrels, tyres, pumps, signs
     static final PropDef CAR_RED_V = p(WASTE, 0, 164, 32, 59, 46, 2);
     static final PropDef CAR_RED_H = p(WASTE, 32, 185, 64, 38, 24, 2);
     static final PropDef CAR_BLUE_V = p(WASTE, 0, 224, 32, 64, 50, 2);
@@ -76,7 +74,6 @@ final class MapSprites {
     static final PropDef TABLE_MED = p(WASTE, 257, 32, 31, 32, 14, 0);
     static final PropDef DESK_RADIO = p(WASTE, 257, 96, 31, 32, 14, 0);
 
-    // Camp sheet: tents, stalls, boxes, barrels, signs, farm plots, logs
     static final PropDef TENT_A = p(CAMP, 28, 229, 68, 75, 44, 6);
     static final PropDef TENT_FLAT = p(CAMP, 112, 250, 64, 54, 36, 2);
     static final PropDef TENT_GREEN = p(CAMP, 30, 336, 36, 64, 34, 2);
@@ -143,7 +140,6 @@ final class MapSprites {
     static final PropDef PAPERS_B = p(CAMP, 306, 497, 12, 15, 0, 0);
     static final PropDef SACK = p(CAMP, 304, 513, 16, 15, 0, 0);
 
-    // Interior sheet: bunker furniture
     static final PropDef CABINET = p(INTER, 0, 224, 32, 45, 18, 0);
     static final PropDef LOCKER_PAIR = p(INTER, 47, 224, 34, 52, 18, 0);
     static final PropDef CUPBOARD = p(INTER, 111, 224, 34, 45, 18, 0);
@@ -181,7 +177,6 @@ final class MapSprites {
     static final PropDef BED_H2 = p(INTER, 32, 515, 39, 29, 20, 0);
     static final PropDef BED_FRAME_H2 = p(INTER, 128, 515, 39, 29, 20, 0);
 
-    // Animated camp props
     static final PropDef FLAME_BARREL = anim("tiles/flame_barrel.png", 64, 64, 12, 22, 7, 5, 6);
     static final PropDef FLAG = anim("tiles/flag.png", 64, 64, 10, 21, 7, 5, 7);
     static final PropDef NPC_TRADER = anim("characters/npc_idle.png", 32, 32, 6, 9, 6, 0, 9);

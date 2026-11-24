@@ -83,10 +83,6 @@ import javax.swing.plaf.metal.MetalLookAndFeel;
 import javax.swing.table.JTableHeader;
 import javax.swing.table.TableCellRenderer;
 
-/**
- * Shared Swing Look-and-Feel built around the Hollow Creek UI Kit (resources/ui/kit):
- * 9-slice panels, kit buttons, check boxes, sliders, bars, slots, cursors, and 3x5 pixel font.
- */
 final class Theme {
 
     static final Color INK = new Color(0x16121A), BG = new Color(0x1B1820), PANEL = new Color(0x2A282F);
@@ -104,7 +100,6 @@ final class Theme {
 
     private Theme() {}
 
-    // ================================================================== fonts & kit sprites
     private static String pickFontFamily() {
         try {
             Set<String> available = new HashSet<>(List.of(
@@ -158,7 +153,6 @@ final class Theme {
         return panel;
     }
 
-    // ================================================================== 3x5 pixel font
     private static final String GLYPHS = " !$%&+-./0123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static boolean[][][] glyphMasks;
 
@@ -223,7 +217,6 @@ final class Theme {
         drawPixelText(g2, text, x, y, scale, color);
     }
 
-    // ================================================================== LookAndFeel & cursors
     static void installLookAndFeel() {
         if (lookAndFeelInstalled) return;
         lookAndFeelInstalled = true;
@@ -260,7 +253,6 @@ final class Theme {
     static Cursor arrowCursor() { return cursor("cursor_arrow", 1, 0); }
     static Cursor handCursor() { return cursor("cursor_hand", 5, 0); }
 
-    // ================================================================== simple Swing helpers
     static JLabel label(String text, int style, int size, Color color) {
         JLabel label = new JLabel(text);
         label.setFont(font(style, size));
@@ -379,7 +371,6 @@ final class Theme {
         }
     }
 
-    // ================================================================== 9-slice panels
     static final class NineSlice {
         private final BufferedImage img;
         private final int l, t, r, b;
@@ -481,7 +472,6 @@ final class Theme {
         protected void paintComponent(Graphics g) { paintPanel((Graphics2D) g, panel, 0, 0, getWidth(), getHeight(), S); }
     }
 
-    // ================================================================== inventory slots & buttons
     enum SlotKind { NORMAL, SELECTED, EMPTY, LOCKED }
 
     static void drawSlot(Graphics2D g2, SlotKind kind, int x, int y, int scale) {
@@ -652,7 +642,6 @@ final class Theme {
         }
     }
 
-    // ================================================================== check box, slider, bars
     static void styleCheckBox(JCheckBox box) {
         box.setIcon(new CheckIcon());
         box.setOpaque(false);
@@ -751,7 +740,6 @@ final class Theme {
         }
     }
 
-    // ================================================================== text field, combo, scroll, table
     static final class KitField extends JTextField {
         private static final long serialVersionUID = 1L;
         private boolean error;
@@ -947,7 +935,6 @@ final class Theme {
         }
     }
 
-    // ================================================================== SpeechBox & HUD drawing strips
     static final class SpeechBox extends JComponent {
         private static final long serialVersionUID = 1L;
         private final transient BufferedImage boxImage, portrait;
@@ -1055,7 +1042,6 @@ final class Theme {
         g.dispose();
     }
 
-    // ================================================================== modal dialogs & image utilities
     static boolean ask(Window owner, Panel panel, String titleSprite, String title, String message,
                        String[][] rows, String primaryText, String secondaryText) {
         JDialog dialog = new JDialog(owner, title, Dialog.ModalityType.APPLICATION_MODAL);

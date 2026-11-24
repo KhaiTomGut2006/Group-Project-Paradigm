@@ -24,10 +24,6 @@ import javax.sound.sampled.Clip;
 import javax.sound.sampled.FloatControl;
 import javax.sound.sampled.LineEvent;
 
-/**
- * Crash-proof static loader and cache for sprites and WAV audio under Project3_6813107/resources/.
- * Missing images produce a magenta/black checker; missing or unavailable audio is skipped cleanly.
- */
 public final class AssetLoader {
 
     private AssetLoader() {}
@@ -49,7 +45,6 @@ public final class AssetLoader {
         throw new IOException("resource not found: " + relPath);
     }
 
-    // ------------------------------------------------------------------ images
     public static synchronized BufferedImage loadImage(String relPath) {
         BufferedImage cached = IMAGE_CACHE.get(relPath);
         if (cached != null) return cached;
@@ -129,7 +124,6 @@ public final class AssetLoader {
         return out;
     }
 
-    // ------------------------------------------------------------------ transforms
     public static BufferedImage flipHorizontal(BufferedImage src) {
         int w = src.getWidth(), h = src.getHeight();
         BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_ARGB);
@@ -159,7 +153,6 @@ public final class AssetLoader {
         return out;
     }
 
-    // ------------------------------------------------------------------ sprite shortcuts
     public static BufferedImage[] getItemFrames(GameData.ItemType type) {
         BufferedImage sheet = loadImage(type.spritePath);
         return loadStrip(type.spritePath, Math.max(1, sheet.getWidth() / type.frameW));
@@ -181,7 +174,6 @@ public final class AssetLoader {
     public static BufferedImage[] getImpactFrames() { return loadStrip("ui/bullet_impact.png", 5); }
     public static BufferedImage[] getAlertFrames() { return loadStrip("ui/popup_alert.png", 5); }
 
-    // ------------------------------------------------------------------ sound
     private static volatile boolean soundEnabled = true;
     private static volatile boolean musicEnabled = true;
     private static volatile int volumePercent = 70;

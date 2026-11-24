@@ -13,10 +13,6 @@ import java.awt.image.BufferedImage;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Superclass for all world entities (Player, Monster, Bullet, DroppedItem).
- * (x, y) is the hitbox center in world pixels; the bottom edge is the feet line used for depth sorting.
- */
 public abstract class Entity implements GameMap.Drawable {
 
     protected double x, y;
@@ -75,7 +71,6 @@ public abstract class Entity implements GameMap.Drawable {
         return dealt;
     }
 
-    /** Moves one axis at a time so entities slide smoothly along walls. */
     protected boolean moveWithCollision(double dx, double dy) {
         if (map == null) {
             x += dx;

@@ -47,16 +47,6 @@ import javax.swing.table.AbstractTableModel;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.TableCellRenderer;
 
-/**
- * Modal Safe Camp Workshop dialog (860x660): JTable of permanent recipes, paper detail card,
- * and 11-slot backpack.
- *
- * Event handlers:
- *   actionPerformed(ActionEvent)     - CRAFT and BACK buttons
- *   valueChanged(ListSelectionEvent) - updates details when selecting a table row
- *   mouseClicked(MouseEvent)         - double-click a row to craft/equip (RowClickHandler)
- *   KeyCommand                       - Enter crafts, Esc or B closes
- */
 public final class UpgradeDialog extends JDialog implements ActionListener, ListSelectionListener {
 
     private static final long serialVersionUID = 1L;
@@ -105,7 +95,6 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         setLocationRelativeTo(owner);
     }
 
-    // ================================================================== layout
     private JPanel buildHeader() {
         trader = new Theme.SpeechBox("portrait_other", GREETING);
         Theme.PixelLabel title = new Theme.PixelLabel("BASE CAMP NPCs", 5, Theme.GOLD);
@@ -218,7 +207,6 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         recipeTable.getActionMap().put("craft", new KeyCommand("craft"));
     }
 
-    // ================================================================== event handlers & actions
     @Override
     public void actionPerformed(ActionEvent e) {
         if (e.getSource() == craftButton) craftSelectedUpgrade();
@@ -262,7 +250,6 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         }
     }
 
-    // ================================================================== helpers
     private GameData.UpgradeRecipe getSelectedRecipe() {
         int row = recipeTable.getSelectedRow();
         return row >= 0 ? GameData.RECIPES.get(row) : null;
@@ -452,7 +439,6 @@ public final class UpgradeDialog extends JDialog implements ActionListener, List
         };
     }
 
-    // ================================================================== table models & listeners
     private final class RecipeTableModel extends AbstractTableModel {
         private static final long serialVersionUID = 1L;
         private final String[] columns = {"UPGRADE", "COST", "STATUS"};

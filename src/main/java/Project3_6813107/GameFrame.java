@@ -35,10 +35,6 @@ import javax.swing.JProgressBar;
 import javax.swing.JTextArea;
 import javax.swing.border.EmptyBorder;
 
-/**
- * Main gameplay window (1100x660): top HUD bar, GamePanel canvas in CENTER,
- * bottom weapon hotbar/backpack/NPC bar, plus modal dialogs for Workshop, Perks, and Field Merchant.
- */
 public final class GameFrame extends JFrame implements ActionListener {
 
     private static final long serialVersionUID = 1L;
@@ -91,7 +87,6 @@ public final class GameFrame extends JFrame implements ActionListener {
         gamePanel.requestFocusInWindow();
     }
 
-    // ------------------------------------------------------------------ HUD layout
     private JComponent buildTopBar() {
         heartIcon = new JLabel();
         hpBar = Theme.bar(Theme.Fill.HEALTH, 140, Theme.S);
@@ -179,7 +174,6 @@ public final class GameFrame extends JFrame implements ActionListener {
         return b;
     }
 
-    // ------------------------------------------------------------------ HUD refresh
     public void refreshHud() {
         if (closed) return;
         Player p = gamePanel.getPlayer();
@@ -259,7 +253,6 @@ public final class GameFrame extends JFrame implements ActionListener {
         }
     }
 
-    // ------------------------------------------------------------------ bottom bar views
     private static final class HotbarView extends JComponent {
         private static final long serialVersionUID = 1L;
         private static final GameData.WeaponType[] WEAPONS = GameData.HOTBAR_WEAPONS;
@@ -339,7 +332,6 @@ public final class GameFrame extends JFrame implements ActionListener {
         }
     }
 
-    // ------------------------------------------------------------------ actions & modal dialogs
     @Override
     public void actionPerformed(ActionEvent e) {
         Object source = e.getSource();
@@ -509,7 +501,6 @@ public final class GameFrame extends JFrame implements ActionListener {
         dlg.setVisible(true);
     }
 
-    // ------------------------------------------------------------------ end of run & close
     public void onGameOver(boolean survived) {
         if (finished || closed) return;
         finished = true;

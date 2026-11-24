@@ -20,10 +20,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/**
- * 56x36 tile arena: pre-rendered ground, solid props, border walls/fences, Safe Camp Hub,
- * 12 procedural combat room layouts, BFS flow-field pathfinding, and minimap rendering.
- */
 public final class GameMap {
 
     public static final int COLS = 56, ROWS = 36;
@@ -118,7 +114,6 @@ public final class GameMap {
         renderMinimap();
     }
 
-    // ------------------------------------------------------------------ public API
     public String getChamberLayoutName() { return chamberLayoutName; }
     public GameData.MapType getType() { return type; }
     public int getWidthPx() { return COLS * T; }
@@ -308,7 +303,6 @@ public final class GameMap {
         return list;
     }
 
-    // ------------------------------------------------------------------ path finding
     public double getChaseAngle(double fromX, double fromY, double toX, double toY, int feetWidth) {
         double direct = Math.atan2(toY - fromY, toX - fromX);
         if (hasClearPath(fromX, fromY, toX, toY, feetWidth)) return direct;
@@ -387,7 +381,6 @@ public final class GameMap {
         }
     }
 
-    // ------------------------------------------------------------------ building helpers
     private void paint(int groundType, int col, int row, int w, int h) {
         for (int r = row; r < row + h; r++) {
             for (int c = col; c < col + w; c++) {
@@ -514,7 +507,6 @@ public final class GameMap {
         clearWallRect(x + w - t, midR - vDoorH / 2, t, vDoorH);
     }
 
-    // ------------------------------------------------------------------ procedural chambers (12 styles)
     private void buildProceduralChamber() {
         int padC = 1 + rng.nextInt(4), padR = 1 + rng.nextInt(3);
         int minC = padC, maxC = COLS - 1 - padC, minR = Math.max(2, padR), maxR = ROWS - 1 - padR;
@@ -800,7 +792,6 @@ public final class GameMap {
         clearWallRect(c1 - 1, r1 - 1, 3, 3);
     }
 
-    // ------------------------------------------------------------------ the central camp & reusable arrangements
     private void buildCamp() {
         int c0 = campArea.x / T, r0 = campArea.y / T;
         boolean indoor = type == GameData.MapType.ABANDONED_BUNKER;
@@ -844,7 +835,6 @@ public final class GameMap {
         }
     }
 
-    // ------------------------------------------------------------------ 5 Safe Hub maps
     private void buildHighway() {
         paint(DIRT, 0, 4, COLS, 6);
         paint(DIRT, 25, 10, 6, ROWS - 10);
@@ -1132,7 +1122,6 @@ public final class GameMap {
         addSolid(solid);
     }
 
-    // ------------------------------------------------------------------ ground rendering
     private BufferedImage tile(String sheet, int x, int y) { return AssetLoader.subImage(sheet, x, y, T, T); }
 
     private static final int[] SAND_SPECKS = {0xFFAD7757, 0xFFAD7757, 0xFF9B6658, 0xFFCCA07F};
@@ -1319,7 +1308,6 @@ public final class GameMap {
         }
     }
 
-    // ------------------------------------------------------------------ analysis after building
     private void computeWalkable() {
         walkable = new boolean[ROWS][COLS];
         openEast = new boolean[ROWS][COLS];

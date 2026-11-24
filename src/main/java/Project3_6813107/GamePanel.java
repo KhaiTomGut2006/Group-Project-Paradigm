@@ -35,10 +35,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 
-/**
- * Main game canvas and simulation engine. Runs two background threads (gameThread at 16 ms steps
- * and waveSpawnerThread for chamber reinforcements) and handles keyboard + mouse input.
- */
 public final class GamePanel extends JPanel
         implements Runnable, KeyListener, MouseListener, MouseMotionListener, MouseWheelListener {
 
@@ -52,7 +48,6 @@ public final class GamePanel extends JPanel
     private static final Color TEXT_DAMAGE = Theme.TEXT, TEXT_KILL = Theme.GOLD, TEXT_HURT = Theme.RED;
     private static final Color TEXT_LOOT = new Color(0xB4DC70), BANNER_WAVE = Theme.GOLD, BANNER_BOSS = Theme.RED;
 
-    // ------------------------------------------------------------------ world & thread state
     private final transient GameData.GameSettings settings;
     private final GameFrame frame;
     private transient GameMap map;
@@ -84,7 +79,6 @@ public final class GamePanel extends JPanel
     private volatile double camX, camY, shakeX, shakeY;
     private transient volatile Banner banner;
 
-    // ------------------------------------------------------------------ input state (EDT -> game thread)
     private volatile boolean keyUp, keyDown, keyLeft, keyRight, mouseFiring, mouseInside;
     private volatile int mouseX = DEFAULT_VIEW_W / 2 + 80, mouseY = DEFAULT_VIEW_H / 2;
     private volatile boolean grenadeRequested, medkitRequested, interactRequested, dashRequested;
@@ -97,7 +91,6 @@ public final class GamePanel extends JPanel
     private final transient GameOverlay overlay;
     private int originX, originY;
 
-    // ------------------------------------------------------------------ construction
     public GamePanel(GameData.GameSettings settings, GameFrame frame) {
         this.settings = settings == null ? new GameData.GameSettings() : settings;
         this.frame = frame;
@@ -153,7 +146,6 @@ public final class GamePanel extends JPanel
         AssetLoader.getAlertFrames();
     }
 
-    // ------------------------------------------------------------------ multithreading
     public void startGame() {
         if (running) return;
         running = true;
@@ -246,7 +238,6 @@ public final class GamePanel extends JPanel
         if (frame != null) SwingUtilities.invokeLater(frame::refreshHud);
     }
 
-    // ------------------------------------------------------------------ input handlers (KeyListener + Mouse*)
     @Override
     public void keyPressed(KeyEvent e) {
         int code = e.getKeyCode();
@@ -334,7 +325,6 @@ public final class GamePanel extends JPanel
         keyUp = keyDown = keyLeft = keyRight = mouseFiring = false;
     }
 
-    // ------------------------------------------------------------------ simulation step
     public void updateGame() {
         if (paused) return;
         synchronized (worldLock) {
@@ -366,7 +356,6 @@ public final class GamePanel extends JPanel
         }
     }
 
-    // ------------------------------------------------------------------ chambers & hub
     private void initSafeCamp(boolean returningFromRun) {
         GameData.MapType hubType = settings.map == null ? GameData.MapType.WASTELAND_HIGHWAY : settings.map;
         chamber = 0;
@@ -682,7 +671,6 @@ public final class GamePanel extends JPanel
         enterChamber(best.nextChamber, best.type == GameData.ChamberType.ENDLESS_ABYSS ? GameData.ChamberType.ELITE_HAZARD : best.type);
     }
 
-    // ------------------------------------------------------------------ traps, base allies & spawning
     private void spawnTrapsForChamber(int c, GameData.ChamberType kind, Point spawn) {
         int targetCount = Math.min(28, 4 + c * 3 / 2 + (kind == GameData.ChamberType.ELITE_HAZARD ? 5 : 0));
         HazardTrap.TrapKind[] allKinds = HazardTrap.TrapKind.values();
@@ -896,7 +884,6 @@ public final class GamePanel extends JPanel
         shake(5, 30);
     }
 
-    // ------------------------------------------------------------------ player, combat, loot & effects
     private void updatePlayer() {
         if (!player.isAlive()) {
             player.update();
@@ -1167,7 +1154,6 @@ public final class GamePanel extends JPanel
         }
     }
 
-    // ------------------------------------------------------------------ field merchant
     public List<FieldShopOffer> getFieldShopOffers() { return new ArrayList<>(fieldShopOffers); }
 
     private int scaleMerchantCost(int rawCost) {
@@ -1230,7 +1216,6 @@ public final class GamePanel extends JPanel
         return feedback;
     }
 
-    // ------------------------------------------------------------------ drawing
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
@@ -1354,7 +1339,6 @@ public final class GamePanel extends JPanel
         else if (mouseInside) overlay.drawCrosshair(g2, mouseX, mouseY);
     }
 
-    // ------------------------------------------------------------------ getters for GameFrame & tests
     public Player getPlayer() { return player; }
     public int getChamber() { return chamber; }
     public boolean isInSafeCamp() { return chamber == 0; }
@@ -1400,7 +1384,6 @@ public final class GamePanel extends JPanel
     private double getMouseWorldY() { return camY + mouseY / (double) SCALE; }
     private Rectangle getCameraView() { return new Rectangle((int) camX, (int) camY, getViewWidth() / SCALE + 1, getViewHeight() / SCALE + 1); }
 
-    // ------------------------------------------------------------------ nested world types
     public static final class FieldShopOffer {
         public enum OfferKind { HEAL, TEMP_WEAPON, PERK }
         public final OfferKind kind;
